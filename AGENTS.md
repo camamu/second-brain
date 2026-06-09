@@ -1,166 +1,90 @@
-# AGENTS.md — Obsidian RAG Agent
+# AGENTS.md — second-brain (Obsidian RAG Agent)
 
-## Descripción del proyecto
+## What this is
 
-Sistema RAG (Retrieval-Augmented Generation) conversacional que permite "hablar" con un vault de Obsidian. El usuario puede hacer preguntas sobre sus notas, crear notas nuevas y editar las existentes desde una interfaz de chat.
+TFM (academic project): conversational RAG agent over an Obsidian vault via Chainlit. Three chunking strategies are the research contribution (Precision@K + MRR evaluation).
 
-Es un TFM académico con dos objetivos:
+**Status: scaffolding only.** `src/` packages exist but most are empty `__init__.py`. One adapter implemented (`src/adapters/llm/ollama_chat.py`). No real tests, scripts, or `.env.example` yet.
 
-1. **Sistema funcional**: agente LangChain con herramientas que actúa sobre el vault.
-2. **Aportación investigadora**: comparativa de tres estrategias de chunking medida con Precision@K y MRR.
+Do not assume components mentioned below (chunkers, ChromaDB store, ingest script, app entrypoint) are implemented — check the filesystem before referencing them.
 
----
+## Stack
 
-## Stack técnico
-
-| Componente | Tecnología |
+| Layer | Tech |
 |---|---|
-| LLM local | Ollama + Llama 3.2 |
-| LLM producción | Groq (llama-3.2) |
-| Embeddings local | Ollama + nomic-embed-text |
-| Embeddings producción | HuggingFace nomic-embed-text-v1 |
-| Vector store | ChromaDB (persistido en `data/chroma_db/`) |
-| Orquestador | LangChain |
-| Interfaz | Chainlit |
-| Lenguaje | Python 3.11+ |
+| LLM | Ollama (`llama3.2` / `qwen3.6:35b-a3b`) |
+| Embeddings | Ollama `nomic-embed-text` |
+| Vector store | ChromaDB (persisted to `data/chroma_db/`) |
+| Orchestrator | LangChain |
+| UI | Chainlit (`app.py`) |
 
----
+## Architecture
 
-## Arquitectura: Puertos y Adaptadores (Hexagonal)
+Hexagonal, intent-driven. Internal layers must not depend on external ones:
 
 ```
-domain/          → Entidades y puertos (interfaces abstractas). Sin dependencias externas.
-application/     → Casos de uso. Solo depende de domain/.
-adapters/        → Implementaciones concretas de los puertos.
-agent/           → Agente LangChain y herramientas.
-infrastructure/  → Configuración, variables de entorno, factories.
+src/domain/      → entities + ports (ABC interfaces)
+src/application/ → use cases (Receive config from domain-only params)
+src/adapters/    → LLM, chunkers, embedders, loaders, vector stores (implement ports)
+src/agent/       → LangChain agent + tools
+src/app/         → Chainlit entrypoint
+src/infrastructure/ → config loading, dependency wiring
 ```
 
-**Regla de dependencias**: las capas internas nunca importan de las externas.
+**Port naming**: `NounVerber` e.g. `NoteLoader`, `ChunkEmbedder`.
+**All methods abstract**: full type hints on ABC methods and `__init__` params.
+**Adapters receive injected config only** — no direct `os.getenv()`.
 
-- `domain` no importa nada del proyecto
-- `application` solo importa de `domain`
-- `adapters` implementa interfaces de `domain`
-- `infrastructure` une todo mediante inyección de dependencias
+## Key conventions
 
----
+- Python 3.11+, type hints on all public functions
+- Google-style docstrings (classes and public methods)
+- Code in English; Spanish only in TFM-explanatory comments
+- 80-char line limit; `logging` not `print()`
+- One adapter class per file, one use case class with `execute()` method
 
-## Convenciones de código
-
-### General
-
-- Python 3.11+, type hints en todas las funciones
-- Docstrings en clases y métodos públicos (formato Google)
-- Nombres en inglés para código, español solo en comentarios explicativos del TFM
-- Máximo 80 caracteres por línea
-- Sin `print()` en producción — usar `logging`
-
-### Puertos (interfaces)
-
-- Definidos en `src/domain/ports.py` como clases abstractas con `ABC`
-- Nombres: `NounVerber` → ej. `NoteLoader`, `ChunkEmbedder`, `VectorStore`
-- Todos los métodos abstractos llevan type hints completos
-
-### Adaptadores
-
-- Un fichero por adaptador
-- El constructor recibe SOLO los parámetros que necesita (no el objeto config completo)
-- Nunca llaman a `os.getenv()` directamente — reciben la config inyectada
-
-### Casos de uso
-
-- Una clase por caso de uso, un método público `execute()`
-- Sin lógica de infraestructura (no instancian adaptadores, los reciben)
-
-### Tests
-
-- `tests/unit/` → sin I/O, sin red, sin ficheros reales
-- `tests/integration/` → pueden usar ChromaDB en memoria y Ollama real
-- Nombrado: `test_<módulo>_<comportamiento>_<resultado_esperado>`
-
----
-
-## Variables de entorno
-
-Ver `.env.example` para la lista completa. Las más importantes:
+## Env variables (create `.env` from these)
 
 ```
 USE_LOCAL=true          # true=Ollama, false=Groq+HuggingFace
-VAULT_PATH=             # Ruta absoluta al vault de Obsidian
+VAULT_PATH=             # absolute path to Obsidian vault
 OLLAMA_BASE_URL=http://localhost:11434
-GROQ_API_KEY=           # Solo necesario si USE_LOCAL=false
+GROQ_API_KEY=           # only when USE_LOCAL=false
+CHUNKER_STRATEGY=fixed  # fixed|markdown|backlink
 ```
 
----
-
-## Chunkers (núcleo de la investigación)
-
-Hay tres implementaciones en `src/adapters/chunkers/`, todas implementan `BaseChunker`:
-
-| Chunker | Fichero | Descripción |
-|---|---|---|
-| Fixed size | `fixed_size.py` | Split por tokens con solapamiento configurable |
-| Markdown header | `markdown_header.py` | Cada sección `##` es un chunk |
-| Backlink-aware | `backlink_aware.py` | Nota + notas enlazadas como unidad semántica |
-
-Para cambiar la estrategia activa: variable `CHUNKER_STRATEGY=fixed|markdown|backlink` en `.env`.
-
----
-
-## Comandos útiles
+## Commands
 
 ```bash
-# Activar entorno virtual
-source .venv/bin/activate
-
-# Indexar el vault (primera vez o tras cambios)
-python scripts/ingest.py
-
-# Arrancar la interfaz de chat
-chainlit run app.py
-
-# Ejecutar tests
-pytest tests/unit/
-pytest tests/integration/
-
-# Verificar que Ollama responde
-python scripts/test_ollama.py
+source .venv/bin/activate       # activate venv
+python scripts/test_ollama_chat.py   # verify Ollama connectivity (only script that exists)
+chainlit run src/app/__init__.py  # start chat UI (once app is implemented)
+pytest tests/unit/              # unit tests (no I/O, no network)
+pytest tests/integration/       # integration (ChromaDB in-memory + real Ollama ok)
 ```
+
+Test naming: `test_<module>_<behavior>_<expected_result>`
+
+## Data flow
+
+```
+Vault .md → ObsidianLoader → Chunker → Embedder → VectorStore (ChromaDB)
+User query → Agent (ReAct) → search_vault tool → LLM response → Chainlit UI
+```
+
+Tools the agent provides: `search_vault`, `create_note`, `edit_note`
+
+## Gotchas for agents
+
+1. **Most of `src/` is empty stubs** — verify what actually exists with `find src -name "*.py"`; there are 14 total with most being blank `__init__.py`.
+2. **Correct script name** — the only real script is `scripts/test_ollama_chat.py`, not `test_ollama.py`.
+3. **No Makefile/task runner** — every command must be typed manually; no `npm test`, `make build`, etc.
+4. **`scripts/test_ollama_chat.py` uses `sys.path.insert(0, ...)` to reach `src/`** — imports won't work without it; do not rely on pip install or package installs yet.
+5. **OllamaChat hardcodes defaults** — `src/adapters/llm/ollama_chat.py:18-24` sets `model="llama3.2"`, `base_url`, and a system prompt in the signature; pass them explicitly (they're not loaded from env).
+6. **README.md is a single-line tagline** — gives no navigational help.
+7. **`data/chroma_db/` and tests directories are empty** — vault must be ingested before retrieval works; `tests/unit/` and `tests/integration/` contain no test files yet.
+8. **No lint/typecheck config exists** — pyproject.toml, tox.ini, ruff.toml all absent. Tests run with bare `pytest`.
 
 ---
 
-## Flujo de datos
-
-```
-Vault .md files
-    → ObsidianLoader        (lee frontmatter + contenido + backlinks)
-    → BaseChunker           (divide en chunks según estrategia)
-    → ChunkEmbedder         (genera vectores con nomic-embed-text)
-    → VectorStore           (persiste en ChromaDB)
-
-Query del usuario
-    → Agent                 (LangChain con ReAct)
-    → Tool: search_vault    (retrieval semántico en ChromaDB)
-    → Tool: create_note     (escribe .md en el vault)
-    → Tool: edit_note       (modifica .md existente)
-    → LLM                   (genera respuesta con contexto recuperado)
-    → Chainlit UI
-```
-
----
-
-## Estado del proyecto
-
-- [ ] Entorno configurado
-- [ ] Domain: modelos y puertos
-- [ ] Adaptador: ObsidianLoader
-- [ ] Adaptador: tres chunkers
-- [ ] Adaptador: ChromaDB
-- [ ] Adaptador: Ollama LLM
-- [ ] Adaptador: Groq LLM
-- [ ] Caso de uso: IngestVault
-- [ ] Caso de uso: SearchNotes
-- [ ] Agente con herramientas
-- [ ] Interfaz Chainlit
-- [ ] Evaluación: dataset + métricas
-- [ ] Despliegue HuggingFace Spaces
+*Generated from filesystem inspection. Trust the code, not this file.*
