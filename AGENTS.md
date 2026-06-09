@@ -11,7 +11,7 @@ Do not assume components mentioned below (chunkers, ChromaDB store, ingest scrip
 ## Stack
 
 | Layer | Tech |
-|---|---|
+| --- | --- |
 | LLM | Ollama (`llama3.2` / `qwen3.6:35b-a3b`) |
 | Embeddings | Ollama `nomic-embed-text` |
 | Vector store | ChromaDB (persisted to `data/chroma_db/`) |
@@ -22,7 +22,7 @@ Do not assume components mentioned below (chunkers, ChromaDB store, ingest scrip
 
 Hexagonal, intent-driven. Internal layers must not depend on external ones:
 
-```
+```text
 src/domain/      → entities + ports (ABC interfaces)
 src/application/ → use cases (Receive config from domain-only params)
 src/adapters/    → LLM, chunkers, embedders, loaders, vector stores (implement ports)
@@ -45,7 +45,7 @@ src/infrastructure/ → config loading, dependency wiring
 
 ## Env variables (create `.env` from these)
 
-```
+```env
 USE_LOCAL=true          # true=Ollama, false=Groq+HuggingFace
 VAULT_PATH=             # absolute path to Obsidian vault
 OLLAMA_BASE_URL=http://localhost:11434
@@ -67,7 +67,7 @@ Test naming: `test_<module>_<behavior>_<expected_result>`
 
 ## Data flow
 
-```
+```text
 Vault .md → ObsidianLoader → Chunker → Embedder → VectorStore (ChromaDB)
 User query → Agent (ReAct) → search_vault tool → LLM response → Chainlit UI
 ```
