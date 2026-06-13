@@ -18,7 +18,6 @@ from typing import List
 
 from .models import (
     Chunk,
-    ChunkStrategy,
     EvaluationResult,
     EvaluationSample,
     Note,
