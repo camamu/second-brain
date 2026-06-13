@@ -402,8 +402,8 @@ la sección 6.
 ### 📚 Documentación y sincronización
 - [x] `docs/error-log.md`: entrada de la deriva spec ↔ dominio (con la alternativa
       descartada y por qué).
-- [ ] `tasks/fase-2-ingesta.md`: actualizar a lo realmente construido.
-- [ ] `CLAUDE.md`: actualizar nombres de puertos/entidades.
+- [x] `tasks/fase-2-ingesta.md`: actualizar a lo realmente construido.
+- [x] `CLAUDE.md`: actualizar nombres de puertos/entidades.
 
 ### ✅ Verificación final
 - [x] `pytest tests/unit/ -v` en verde.

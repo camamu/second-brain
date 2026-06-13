@@ -19,7 +19,7 @@ ruff check src/                              # lint
 ruff format src/                             # format
 ```
 
-No Makefile exists. No `pyproject.toml` — ruff and pytest run with bare defaults.
+No Makefile exists. `pyproject.toml` exists with ruff and pytest configuration.
 
 ## Architecture
 
@@ -36,9 +36,15 @@ src/infrastructure/  → config loading (.env), dependency wiring
 
 **Domain entities** (`src/domain/models.py`): `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, plus enums `ChunkStrategy` and `NoteType`. All are `@dataclass(frozen=True)`.
 
-**Ports** (`src/domain/ports.py`): `IVaultReader`, `IVaultWriter`, `IBaseChunker`, `IEmbedder`, `IVectorStore`, `ILLMChat`, `IEvaluationRepo`. Port naming convention: `INounVerber`.
+**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter`, `BaseChunker`, `IEmbedder`, `IVectorStore`, `ILLMChat`, `IEvaluationRepo`.
 
-**Only implemented adapter**: `src/adapters/llm/ollama_chat.py` — wraps `ChatOllama` from `langchain-ollama`. Everything else under `src/adapters/` is an empty `__init__.py`.
+**Implemented adapters** (Fase 2):
+- `src/adapters/obsidian_loader.py` — `ObsidianLoader` (implements `NoteLoader` + `NoteWriter`)
+- `src/adapters/chunkers/fixed_size.py` — `FixedSizeChunker` + shared `split_text()`
+- `src/adapters/chunkers/markdown_header.py` — `MarkdownHeaderChunker`
+- `src/adapters/chunkers/backlink_aware.py` — `BacklinkAwareChunker` (injects `NoteLoader`)
+- `src/adapters/chunkers/base.py` — re-exports `BaseChunker` from domain
+- `src/adapters/llm/ollama_chat.py` — `OllamaChat` (wraps `ChatOllama`)
 
 ## Key conventions
 
@@ -63,20 +69,32 @@ CHUNKER_STRATEGY=fixed      # fixed|markdown|backlink
 
 ## Current state
 
-Most of `src/` is empty stubs. Verify what exists before referencing it:
+Verify what exists before referencing it:
 
 ```bash
 find src -name "*.py" ! -name "__init__.py"
 ```
 
-As of the last commit on `feature/create-domain-entities`, only these files have real content:
-- `src/domain/models.py` — all domain entities implemented
-- `src/domain/ports.py` — all ABC interfaces implemented
-- `src/adapters/llm/ollama_chat.py` — one concrete adapter
+As of `feature/domain-refactor` (Fase 2 complete), files with real content:
+- `src/domain/models.py` — `Note` (+ `path`, `note_type`), `Chunk` (+ `heading`, `ChunkStrategy` enum), `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`
+- `src/domain/ports.py` — `NoteLoader`, `NoteWriter`, `BaseChunker`, `IEmbedder`, `IVectorStore`, `ILLMChat`, `IEvaluationRepo` + exception hierarchy
+- `src/adapters/obsidian_loader.py` — `ObsidianLoader`
+- `src/adapters/chunkers/fixed_size.py` — `FixedSizeChunker`, `split_text()`
+- `src/adapters/chunkers/markdown_header.py` — `MarkdownHeaderChunker`
+- `src/adapters/chunkers/backlink_aware.py` — `BacklinkAwareChunker`
+- `src/adapters/llm/ollama_chat.py` — `OllamaChat`
 - `scripts/test_ollama_chat.py` — connectivity smoke test
+- `tests/unit/test_models.py`, `test_obsidian_loader.py`, `test_chunkers.py` — 44 tests, all passing
 
-`tests/unit/` and `tests/integration/` directories exist but contain no test files yet.  
 `data/chroma_db/` is empty — the vault must be ingested before retrieval works.
+
+## Error log
+
+`docs/error-log.md` tracks design and implementation mistakes caught during AI-assisted development. **Read it at the start of each phase** to avoid repeating them.
+
+Current lessons:
+- **Spec/domain name drift**: verify that entity and port names in the next phase's spec match the current domain before implementing. If they diverge, refactor the domain first.
+- **Lint after merges**: always run `ruff check src/ tests/ --fix && ruff format src/ tests/` locally before pushing after any conflict resolution.
 
 ## Implementation roadmap
 
