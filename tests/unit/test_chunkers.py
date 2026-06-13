@@ -167,7 +167,9 @@ def test_backlink_aware_chunker_ignores_missing_backlinks():
     # Arrange
     loader = MagicMock(spec=NoteLoader)
     loader.exists.return_value = False
-    note = _note("Contenido principal sin backlinks resueltos.", backlinks=["no/existe"])
+    note = _note(
+        "Contenido principal sin backlinks resueltos.", backlinks=["no/existe"]
+    )
     chunker = BacklinkAwareChunker(loader)
     # Act
     chunks = chunker.chunk(note)
