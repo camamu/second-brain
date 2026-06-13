@@ -252,13 +252,8 @@ class EvaluationResult:
             raise ValueError("strategy no puede estar vacio")
         if self.mrr < 0.0 or self.mrr > 1.0:
             raise ValueError("mrr debe estar entre 0.0 y 1.0")
-        if (
-            self.average_precision < 0.0
-            or self.average_precision > 1.0
-        ):
-            raise ValueError(
-                "average_precision debe estar entre 0.0 y 1.0"
-            )
+        if self.average_precision < 0.0 or self.average_precision > 1.0:
+            raise ValueError("average_precision debe estar entre 0.0 y 1.0")
         if self.total_samples < 0:
             raise ValueError("total_samples no puede ser negativo")
 

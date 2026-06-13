@@ -1,0 +1,37 @@
+name: Tests unitarios
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: |
+          # Umbral de cobertura — incrementar según el plan en tasks/ci-plan.md:
+          #   Fase 1-3: 0   | Fase 4-5: 40   | Fase 6-7: 60   | Fase 8-9: 80
+          pytest tests/unit/ \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-fail-under=0 \
+            -v

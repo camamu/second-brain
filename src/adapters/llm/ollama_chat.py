@@ -1,7 +1,7 @@
 """Class to test LangChain with Ollama."""
 
-from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 
 SYSTEM_PROMPT = "You are a helpful assistant."
 
