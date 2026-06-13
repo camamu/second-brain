@@ -12,36 +12,36 @@ from src.domain.models import (
 
 
 def test_note_word_count_returns_correct_count():
-    note = Note(note_id="n1", title="T", content="uno dos tres cuatro")
+    note = Note(id="n1", title="T", content="uno dos tres cuatro")
     assert note.word_count == 4
 
 
 def test_note_word_count_empty_content_returns_zero():
-    note = Note(note_id="n1", title="T", content="")
+    note = Note(id="n1", title="T", content="")
     assert note.word_count == 0
 
 
 def test_note_has_frontmatter_metadata_true_with_tags():
-    note = Note(note_id="n1", title="T", content="x", tags=["ia"])
+    note = Note(id="n1", title="T", content="x", tags=["ia"])
     assert note.has_frontmatter_metadata is True
 
 
 def test_note_has_frontmatter_metadata_true_with_frontmatter():
-    note = Note(note_id="n1", title="T", content="x", frontmatter={"date": "2024"})
+    note = Note(id="n1", title="T", content="x", frontmatter={"date": "2024"})
     assert note.has_frontmatter_metadata is True
 
 
 def test_note_has_frontmatter_metadata_false_without_data():
-    note = Note(note_id="n1", title="T", content="x")
+    note = Note(id="n1", title="T", content="x")
     assert note.has_frontmatter_metadata is False
 
 
 def test_chunk_char_count_returns_content_length():
     chunk = Chunk(
-        chunk_id="c1",
+        id="c1",
         note_id="n1",
         content="Texto de ejemplo para test.",
-        strategy="fixed",
+        strategy=ChunkStrategy.FIXED_SIZE,
     )
     assert chunk.char_count == len("Texto de ejemplo para test.")
 
@@ -100,6 +100,6 @@ def test_evaluation_result_summary_format():
 
 
 def test_chunk_strategy_values_match_env_strings():
-    assert ChunkStrategy.FIXED.value == "fixed"
-    assert ChunkStrategy.MARKDOWN.value == "markdown"
-    assert ChunkStrategy.BACKLINK.value == "backlink"
+    assert ChunkStrategy.FIXED_SIZE.value == "fixed"
+    assert ChunkStrategy.MARKDOWN_HEADER.value == "markdown"
+    assert ChunkStrategy.BACKLINK_AWARE.value == "backlink"

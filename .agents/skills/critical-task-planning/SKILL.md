@@ -94,6 +94,68 @@ Si una tarea coincide con una fila de esta tabla, el agente puede referenciarla 
 
 ---
 
+## Entregable obligatorio: `implementation-plan.md`
+
+Siempre que se planifique una fase o cualquier tarea no trivial (las del apartado
+"Cuándo aplicar esta skill"), el agente **debe crear o actualizar un fichero
+`implementation-plan.md`** en la raíz del repo **antes de escribir código**. No
+basta con razonar en el chat: el plan se deja por escrito para que sea revisable,
+versionable y sirva de material para la memoria del TFM.
+
+El `implementation-plan.md` debe contener, como mínimo:
+
+1. **Contexto y decisión de fondo** — qué se va a construir y las decisiones clave
+   ya cerradas (incluyendo contradicciones detectadas entre la spec, el código y
+   `CLAUDE.md`, y cómo se resuelven).
+2. **Mapa de cambios** — qué ficheros se crean/modifican y, si hay refactor,
+   tablas "antes → después" de nombres/firmas.
+3. **Especificación** de los componentes a implementar (paso a paso).
+4. **Tests** a escribir.
+5. **Los bloques "Análisis previo"** de los puntos arriesgados (sección anterior).
+6. **Orden de ejecución con *gates*** de verificación (`pytest`/`ruff`).
+7. **Criterio de completado.**
+8. **Lista de TODOs por funcionalidad** (ver abajo).
+
+---
+
+## Entregable obligatorio: lista de TODOs por funcionalidad
+
+Dentro del `implementation-plan.md` (sección final) el agente **debe incluir
+siempre una lista de TODOs agrupada por funcionalidad**, no una lista plana. El
+objetivo es que cada grupo sea una unidad de trabajo independiente, abordable y
+*commiteable* por separado.
+
+Reglas:
+
+- Agrupar por **funcionalidad/capa**, no por orden cronológico. Ejemplos de grupos
+  típicos en este proyecto: `Setup y dependencias`, `Dominio`, `Adaptador X`,
+  `Chunkers`, `Tests`, `Documentación y sincronización`, `Verificación final`.
+- Cada TODO es una casilla markdown (`- [ ]`) concreta y verificable.
+- El **orden de ejecución** entre grupos vive en la sección "Orden de ejecución",
+  no mezclado con los TODOs.
+- A medida que se completa el trabajo, marcar las casillas (`- [x]`) en el fichero.
+
+Formato de referencia:
+
+```markdown
+## TODOs por funcionalidad
+
+### 🔧 Setup y dependencias
+- [ ] ...
+
+### 🧩 Dominio
+- [ ] ...
+
+### 🧪 Tests
+- [ ] ...
+```
+
+> Estos TODOs por escrito son **independientes** del tracking de tareas en vivo
+> del harness (TaskCreate/TaskUpdate): el `implementation-plan.md` es el registro
+> persistente y versionado; el tracking en vivo, si se usa, es efímero.
+
+---
+
 ## Relación con error-log.md
 
 Si, tras aplicar esta skill, la decisión tomada resulta ser incorrecta más adelante (se detecta un bug o el usuario la corrige), la entrada correspondiente en `docs/error-log.md` debe referenciar qué alternativa se descartó entonces y por qué esa alternativa habría sido mejor. Esto cierra el ciclo: planificación crítica → implementación → si falla, error log con la alternativa correcta para la próxima vez.
@@ -106,3 +168,5 @@ Si, tras aplicar esta skill, la decisión tomada resulta ser incorrecta más ade
 - [ ] ¿Existe más de una forma razonable de resolverla?
 - [ ] Si sí a ambas → escribir el bloque "Análisis previo" antes de codificar.
 - [ ] ¿La decisión coincide con la tabla de decisiones recurrentes? → referenciarla en vez de repetir el análisis.
+- [ ] ¿He creado/actualizado `implementation-plan.md` con el plan completo antes de codificar?
+- [ ] ¿El `implementation-plan.md` incluye la lista de TODOs **agrupada por funcionalidad**?
