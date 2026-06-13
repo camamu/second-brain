@@ -1,5 +1,9 @@
 # Fase 2 — Adaptadores de ingesta
 
+> **Estado: COMPLETADA** (rama `feature/domain-refactor`).
+> Incluye refactor del dominio de Fase 1 para alinear nombres con esta spec.
+> Ver `docs/error-log.md` para la deriva detectada y cómo se resolvió.
+
 ## Contexto
 
 Esta fase implementa la lectura del vault de Obsidian y las tres estrategias de chunking que se compararán en la evaluación del TFM.
@@ -168,7 +172,18 @@ Para el BacklinkAwareChunker, mockear el `NoteLoader` (no acceso real a ficheros
 
 ## Criterio de completado
 
-- [ ] ObsidianLoader carga un vault real correctamente
-- [ ] Los tres chunkers producen Chunks con IDs únicos y metadata correcta
-- [ ] Todos los tests pasan: `pytest tests/unit/test_obsidian_loader.py tests/unit/test_chunkers.py -v`
-- [ ] Sin imports cruzados entre adaptadores
+- [x] ObsidianLoader carga un vault real correctamente
+- [x] Los tres chunkers producen Chunks con IDs únicos y metadata correcta
+- [x] Todos los tests pasan: `pytest tests/unit/test_obsidian_loader.py tests/unit/test_chunkers.py -v`
+- [x] Sin imports cruzados entre adaptadores
+
+## Notas de implementación (desviaciones respecto a la spec)
+
+- El dominio de Fase 1 requirió un refactor previo para alinear nombres
+  (`note_id`→`id`, `chunk_id`→`id`, `IVaultReader`→`NoteLoader`, etc.).
+- `Note` recibió dos campos nuevos: `path: str = ""` y `note_type: NoteType = NoteType.OTHER`.
+- `NoteLoader` recibió el método abstracto `exists(note_id: str) -> bool`.
+- La función `split_text()` en `fixed_size.py` es reutilizada por `BacklinkAwareChunker`
+  (no herencia, importación directa de módulo).
+- 44 tests unitarios en total (14 modelos + 14 loader + 16 chunkers), todos en verde.
+- `ruff check` y `ruff format` limpios.
