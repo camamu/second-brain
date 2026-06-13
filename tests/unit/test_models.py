@@ -47,17 +47,23 @@ def test_chunk_char_count_returns_content_length():
 
 
 def test_search_result_is_relevant_above_threshold():
-    result = SearchResult(chunk_id="c1", note_id="n1", content="x" * 10, score=0.85, rank=1)
+    result = SearchResult(
+        chunk_id="c1", note_id="n1", content="x" * 10, score=0.85, rank=1
+    )
     assert result.is_relevant is True
 
 
 def test_search_result_is_relevant_at_threshold():
-    result = SearchResult(chunk_id="c1", note_id="n1", content="x" * 10, score=0.7, rank=1)
+    result = SearchResult(
+        chunk_id="c1", note_id="n1", content="x" * 10, score=0.7, rank=1
+    )
     assert result.is_relevant is True
 
 
 def test_search_result_is_relevant_below_threshold():
-    result = SearchResult(chunk_id="c1", note_id="n1", content="x" * 10, score=0.5, rank=1)
+    result = SearchResult(
+        chunk_id="c1", note_id="n1", content="x" * 10, score=0.5, rank=1
+    )
     assert result.is_relevant is False
 
 
