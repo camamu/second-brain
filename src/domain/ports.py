@@ -24,7 +24,6 @@ from .models import (
     SearchResult,
 )
 
-
 # =================== EXCEPCIONES ===================
 
 
