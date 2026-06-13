@@ -317,9 +317,9 @@ genera el ID con ese formato; el `delete_by_note_id` (en `IVectorStore`) se cabl
 
 ## 7. Criterio de completado
 
-- [ ] `python-frontmatter` instalado y en `requirements.txt`.
+- [x] `python-frontmatter` instalado y en `requirements.txt`.
 - [x] Dominio refactorizado; `pytest tests/unit/test_models.py` en verde.
-- [ ] `ObsidianLoader` carga un vault real correctamente (frontmatter, tags,
+- [x] `ObsidianLoader` carga un vault real correctamente (frontmatter, tags,
       `note_type`, backlinks con alias, notas vacías).
 - [ ] Los tres chunkers producen `Chunk` con IDs únicos, `strategy` correcto y
       metadata correcta; ninguno viola la invariante de 10 chars.
@@ -351,8 +351,8 @@ puede abordar/commitear por separado. El orden recomendado de ejecución está e
 la sección 6.
 
 ### 🔧 Setup y dependencias
-- [ ] Instalar `python-frontmatter` en el entorno virtual.
-- [ ] Crear `requirements.txt` con: `python-frontmatter`, `langchain-ollama`,
+- [x] Instalar `python-frontmatter` en el entorno virtual.
+- [x] Crear `requirements.txt` con: `python-frontmatter`, `langchain-ollama`,
       `langchain-core`, `pytest`, `ruff`.
 
 ### 🧩 Dominio (refactor)
@@ -374,13 +374,13 @@ la sección 6.
       `exc_info=True` + traducción a `ChunkingError`.
 
 ### 📥 ObsidianLoader (adaptador de ingesta)
-- [ ] `load_all()`: recorrido recursivo, parsing de frontmatter, `title`/`tags`/
+- [x] `load_all()`: recorrido recursivo, parsing de frontmatter, `title`/`tags`/
       `note_type`/`created_at`/`updated_at`, backlinks con alias, `id` relativo,
       `path` absoluto, normalización de notas vacías + warning.
-- [ ] `load_by_id()`: resolución de ruta + `NoteNotFoundError` si no existe.
-- [ ] `exists()`: comprobación de existencia en disco.
-- [ ] `create()`: escritura en `00-inbox/` + `VaultWriteError` si ya existe.
-- [ ] `update()`: preserva frontmatter, reemplaza contenido.
+- [x] `load_by_id()`: resolución de ruta + `NoteNotFoundError` si no existe.
+- [x] `exists()`: comprobación de existencia en disco.
+- [x] `create()`: escritura en `00-inbox/` + `VaultWriteError` si ya existe.
+- [x] `update()`: preserva frontmatter, reemplaza contenido.
 
 ### ✂️ Chunkers
 - [ ] Función de split compartida a nivel de módulo (reutilizable, no herencia).
@@ -396,7 +396,7 @@ la sección 6.
 ### 🧪 Tests
 - [x] Reescribir `tests/conftest.py` y `tests/unit/test_models.py` a los nombres
       nuevos; ampliar `tmp_vault` (note_type, alias de backlinks, nota vacía).
-- [ ] `tests/unit/test_obsidian_loader.py` (14 tests de T2.5).
+- [x] `tests/unit/test_obsidian_loader.py` (14 tests de T2.5).
 - [ ] `tests/unit/test_chunkers.py` (16 tests de T2.6, `NoteLoader` mockeado con `spec=`).
 
 ### 📚 Documentación y sincronización
