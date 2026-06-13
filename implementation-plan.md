@@ -321,12 +321,12 @@ genera el ID con ese formato; el `delete_by_note_id` (en `IVectorStore`) se cabl
 - [x] Dominio refactorizado; `pytest tests/unit/test_models.py` en verde.
 - [x] `ObsidianLoader` carga un vault real correctamente (frontmatter, tags,
       `note_type`, backlinks con alias, notas vacías).
-- [ ] Los tres chunkers producen `Chunk` con IDs únicos, `strategy` correcto y
+- [x] Los tres chunkers producen `Chunk` con IDs únicos, `strategy` correcto y
       metadata correcta; ninguno viola la invariante de 10 chars.
-- [ ] `BacklinkAwareChunker` recibe `NoteLoader` por inyección; sin imports cruzados
+- [x] `BacklinkAwareChunker` recibe `NoteLoader` por inyección; sin imports cruzados
       entre adaptadores; reutiliza la función de split (no herencia).
-- [ ] Todos los tests pasan: `pytest tests/unit/ -v`.
-- [ ] `ruff check src/` y `ruff format src/` limpios.
+- [x] Todos los tests pasan: `pytest tests/unit/ -v`.
+- [x] `ruff check src/` y `ruff format src/` limpios.
 - [ ] `docs/error-log.md`, `tasks/fase-2-ingesta.md` y `CLAUDE.md` sincronizados.
 
 ---
@@ -383,28 +383,28 @@ la sección 6.
 - [x] `update()`: preserva frontmatter, reemplaza contenido.
 
 ### ✂️ Chunkers
-- [ ] Función de split compartida a nivel de módulo (reutilizable, no herencia).
-- [ ] `FixedSizeChunker`: split con solapamiento, descarte/fusión de fragmentos
+- [x] Función de split compartida a nivel de módulo (reutilizable, no herencia).
+- [x] `FixedSizeChunker`: split con solapamiento, descarte/fusión de fragmentos
       < 10 chars, metadata correcta, `strategy=FIXED_SIZE`.
-- [ ] `MarkdownHeaderChunker`: split por `##`/`###`, `heading`, texto pre-cabecera,
+- [x] `MarkdownHeaderChunker`: split por `##`/`###`, `heading`, texto pre-cabecera,
       fusión de secciones < 10 chars, `strategy=MARKDOWN_HEADER`.
-- [ ] `BacklinkAwareChunker`: inyección de `NoteLoader`, enriquecimiento 1 nivel
+- [x] `BacklinkAwareChunker`: inyección de `NoteLoader`, enriquecimiento 1 nivel
       (200 chars/backlink, corte en palabra), troceo > 2000 chars con la función
       compartida, `linked_notes` en metadata, `strategy=BACKLINK_AWARE`.
-- [ ] `src/adapters/chunkers/base.py`: re-exporta `BaseChunker` del dominio.
+- [x] `src/adapters/chunkers/base.py`: re-exporta `BaseChunker` del dominio.
 
 ### 🧪 Tests
 - [x] Reescribir `tests/conftest.py` y `tests/unit/test_models.py` a los nombres
       nuevos; ampliar `tmp_vault` (note_type, alias de backlinks, nota vacía).
 - [x] `tests/unit/test_obsidian_loader.py` (14 tests de T2.5).
-- [ ] `tests/unit/test_chunkers.py` (16 tests de T2.6, `NoteLoader` mockeado con `spec=`).
+- [x] `tests/unit/test_chunkers.py` (16 tests de T2.6, `NoteLoader` mockeado con `spec=`).
 
 ### 📚 Documentación y sincronización
-- [ ] `docs/error-log.md`: entrada de la deriva spec ↔ dominio (con la alternativa
+- [x] `docs/error-log.md`: entrada de la deriva spec ↔ dominio (con la alternativa
       descartada y por qué).
 - [ ] `tasks/fase-2-ingesta.md`: actualizar a lo realmente construido.
 - [ ] `CLAUDE.md`: actualizar nombres de puertos/entidades.
 
 ### ✅ Verificación final
-- [ ] `pytest tests/unit/ -v` en verde.
-- [ ] `ruff check src/` y `ruff format src/` limpios.
+- [x] `pytest tests/unit/ -v` en verde.
+- [x] `ruff check src/` y `ruff format src/` limpios.
