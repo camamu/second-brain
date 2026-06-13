@@ -4,14 +4,15 @@ Define los contratos ABC que los adaptadores deben implementar.
 La capa de dominio no depende de ninguna tecnologa externa.
 
 Adaptadores:
-    Document loaders     -> IVaultReader, IVaultWriter
-    Chunkers             -> IBaseChunker
+    Document loaders     -> NoteLoader, NoteWriter
+    Chunkers             -> BaseChunker
     Embedders            -> IEmbedder
     Vector store         -> IVectorStore
     LLM chat             -> ILLMChat
     Evaluation repo      -> IEvaluationRepo
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import List
 
@@ -23,6 +24,9 @@ from .models import (
     RetrievalQuery,
     SearchResult,
 )
+
+logger = logging.getLogger(__name__)
+
 
 # =================== EXCEPCIONES ===================
 
@@ -51,7 +55,7 @@ class VaultWriteError(ObsidianRagError):
     """Se lanza cuando falla la escritura de una nota en el vault."""
 
 
-class IVaultReader(ABC):
+class NoteLoader(ABC):
     """Interface para cargar notas del vault de Obsidian.
 
     Abstrae la lectura de archivos markdown desde el vault,
@@ -69,7 +73,7 @@ class IVaultReader(ABC):
         ...
 
     @abstractmethod
-    def load(self, note_id: str) -> Note:
+    def load_by_id(self, note_id: str) -> Note:
         """Carga una nota por su identificador.
 
         Args:
@@ -79,7 +83,19 @@ class IVaultReader(ABC):
             La nota con frontmatter, tags y backlinks parseados.
 
         Raises:
-            ValueError: Si note_id no existe en el vault.
+            NoteNotFoundError: Si note_id no existe en el vault.
+        """
+        ...
+
+    @abstractmethod
+    def exists(self, note_id: str) -> bool:
+        """Comprueba si una nota existe en el vault.
+
+        Args:
+            note_id: Identificador unico de la nota.
+
+        Returns:
+            True si la nota existe en disco, False en caso contrario.
         """
         ...
 
@@ -105,7 +121,7 @@ class IVaultReader(ABC):
         ...
 
 
-class IVaultWriter(ABC):
+class NoteWriter(ABC):
     """Interface para escribir notas en el vault de Obsidian.
 
     Abstrae la escritura de archivos markdown con frontmatter
@@ -122,41 +138,40 @@ class IVaultWriter(ABC):
         ...
 
     @abstractmethod
-    def write(self, note: Note) -> None:
+    def create(self, title: str, content: str, tags: List[str]) -> Note:
         """Crea una nueva nota en el vault.
 
         Args:
-            note: La nota a crear con su contenido y metadatos.
+            title: Titulo de la nota.
+            content: Contenido markdown de la nota.
+            tags: Lista de tags a incluir en el frontmatter.
+
+        Returns:
+            La nota recien creada.
 
         Raises:
-            ValueError: Si note_id ya existe en el vault.
+            VaultWriteError: Si ya existe una nota con ese titulo.
         """
         ...
 
     @abstractmethod
-    def update(self, note_id: str, note: Note) -> None:
-        """Actualiza una nota existente en el vault.
+    def update(self, note_id: str, content: str) -> Note:
+        """Actualiza el contenido de una nota existente.
 
         Args:
             note_id: Identificador de la nota a actualizar.
-            note: La nota con los valores actualizados.
+            content: Nuevo contenido markdown (preserva frontmatter).
+
+        Returns:
+            La nota con el contenido actualizado.
 
         Raises:
-            ValueError: Si note_id no existe en el vault.
-        """
-        ...
-
-    @abstractmethod
-    def delete(self, note_id: str) -> None:
-        """Elimina una nota del vault.
-
-        Args:
-            note_id: Identificador de la nota a eliminar.
+            NoteNotFoundError: Si note_id no existe en el vault.
         """
         ...
 
 
-class IBaseChunker(ABC):
+class BaseChunker(ABC):
     """Contrato base comun para los tres chunkers.
 
     Define el metodo abstracto chunk() que cada strategy
@@ -180,23 +195,30 @@ class IBaseChunker(ABC):
     def chunk_many(self, notes: List[Note]) -> List[Chunk]:
         """Divide varias notas en chunks, acumulando resultados.
 
-        Este es el unico metodo con implementacion concreta
-        que puede ser util en un puerto. Permite tracking
-        de tokens, error handling y logging compartido.
-
         Args:
             notes: Lista de notas a dividir.
 
         Returns:
             Lista plana de todos los chunks de todas las notas.
+
+        Raises:
+            ChunkingError: Si falla el chunking de alguna nota.
         """
-        all: List[Chunk] = []
+        result: List[Chunk] = []
         for note in notes:
             try:
-                all.extend(self.chunk(note))
-            except Exception:
-                pass
-        return all
+                result.extend(self.chunk(note))
+            except ChunkingError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Error al chunkear nota '%s': %s",
+                    note.id,
+                    exc,
+                    exc_info=True,
+                )
+                raise ChunkingError(str(exc)) from exc
+        return result
 
 
 class IEmbedder(ABC):

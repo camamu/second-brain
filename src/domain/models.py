@@ -12,6 +12,75 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+# =================== ENUMS ===================
+
+
+class ChunkStrategy(Enum):
+    """Estrategias de chunking para dividir el contenido de notas.
+
+    Cada estrategia produce distinta fragmentacion del contenido
+    y afecta la precision@K y MRR en la recuperacion.
+
+    Attributes:
+        FIXED_SIZE: chunking por tamano fijo de caracteres.
+        MARKDOWN_HEADER: chunking por cabeceras markdown (##, ###).
+        BACKLINK_AWARE: chunking basado en relaciones de backlinks.
+    """
+
+    FIXED_SIZE = "fixed"
+    MARKDOWN_HEADER = "markdown"
+    BACKLINK_AWARE = "backlink"
+
+    def __init__(self, value: str) -> None:
+        self._label: str = value.replace("_", " ").title()
+
+    @property
+    def label(self) -> str:
+        """Devuelve una etiqueta legible para logs y UI."""
+        return self._label
+
+
+class NoteType(Enum):
+    """Tipos de nota que se pueden encontrar en un vault de Obsidian.
+
+    Ayuda a categorizar el contenido y aplicar estrategias
+    de chunking diferentes segun el tipo.
+
+    Attributes:
+        DOC: Nota tipo documento o pagina wiki.
+        TODO: Lista de tareas pendientes.
+        MEETING: Nota de reunion con estructura de asistencia.
+        MINDMAP: Mapa mental o estructura jerarquica.
+        SNIPPET: Fragmento de codigo o referencia rapida.
+        OTHER: Cualquier otro tipo de nota no clasificada.
+    """
+
+    DOC = "doc"
+    TODO = "todo"
+    MEETING = "meeting"
+    MINDMAP = "mindmap"
+    SNIPPET = "snippet"
+    OTHER = "other"
+
+    def __init__(self, value: str) -> None:
+        labels = {
+            "doc": "Documento",
+            "todo": "Lista de tareas",
+            "meeting": "Reunion",
+            "mindmap": "Mapa mental",
+            "snippet": "Snippet de codigo",
+            "other": "Otro",
+        }
+        self._label: str = labels.get(value, value.title())
+
+    @property
+    def label(self) -> str:
+        """Devuelve una etiqueta legible para logs y UI."""
+        return self._label
+
+
+# =================== ENTIDADES ===================
+
 
 @dataclass(frozen=True)
 class Note:
@@ -21,28 +90,32 @@ class Note:
     que el sistema de recuperacion aproveche metadatos ricos.
 
     Attributes:
-        note_id: Identificador unico de la nota (slug o filename).
+        id: Identificador unico de la nota (ruta relativa sin .md).
         title: Titulo de la nota, extraido del frontmatter o primer heading.
         content: Contenido markdown de la nota (sin frontmatter).
         frontmatter: Dict con las claves/values del YAML frontmatter.
         tags: Lista de tags extraidos del frontmatter o wikilinks.
-        backlinks: IDs de notas que referencian esta nota mediante wikilinks.
+        backlinks: IDs de notas enlazadas mediante wikilinks.
+        note_type: Tipo de nota segun el frontmatter (default OTHER).
+        path: Ruta absoluta del fichero .md en disco.
         created_at: Fecha de creacion (None si no esta disponible).
         updated_at: Fecha de ultima modificacion (None si no esta disponible).
     """
 
-    note_id: str
+    id: str
     title: str
     content: str
     frontmatter: Dict[str, Any] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
     backlinks: List[str] = field(default_factory=list)
+    note_type: NoteType = NoteType.OTHER
+    path: str = ""
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if not self.note_id:
-            raise ValueError("note_id no puede estar vacio")
+        if not self.id:
+            raise ValueError("id no puede estar vacio")
         if not self.title:
             raise ValueError("title no puede estar vacio")
         if self.content and not self.content.strip():
@@ -76,12 +149,14 @@ class Note:
     def with_tags(self, tags: List[str]) -> Note:
         """Devuelve una copia de la nota con los tags dados."""
         return Note(
-            note_id=self.note_id,
+            id=self.id,
             title=self.title,
             content=self.content,
             frontmatter=self.frontmatter,
             tags=tags,
             backlinks=self.backlinks,
+            note_type=self.note_type,
+            path=self.path,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -96,26 +171,28 @@ class Chunk:
     busqueda semantica y evaluacion de precision@K / MRR.
 
     Attributes:
-        chunk_id: Identificador unico (note_id + indice posicion).
+        id: Identificador unico (note_id + indice, e.g. "notas/tfm_0").
         note_id: ID de la nota madre que contiene este fragmento.
         content: Texto del fragmento sin frontmatter (markdown).
-        strategy: estrategia de chunking usada ("fixed", "markdown", "backlink").
-        position: Posicion ordinal del fragmento dentro de la nota padre.
+        strategy: Estrategia de chunking usada (ChunkStrategy enum).
+        index: Posicion ordinal del fragmento dentro de la nota padre.
         token_count: Estimacion del numero de tokens del contenido.
+        heading: Texto del encabezado markdown del fragmento (o None).
         metadata: Dict con metadatos adicionales para ChromaDB.
     """
 
-    chunk_id: str
+    id: str
     note_id: str
     content: str
-    strategy: str
-    position: int = 0
+    strategy: ChunkStrategy
+    index: int = 0
     token_count: int = 0
+    heading: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.chunk_id:
-            raise ValueError("chunk_id no puede estar vacio")
+        if not self.id:
+            raise ValueError("id no puede estar vacio")
         if not self.note_id:
             raise ValueError("note_id no puede estar vacio")
         if self.content and len(self.content) < 10:
@@ -278,70 +355,3 @@ class EvaluationResult:
             f"Strategy={self.strategy} | Samples={self.total_samples} | "
             f"MRR={self.mrr:.3f} | {p_str}"
         )
-
-
-# =================== ENUMS ===================
-
-
-class ChunkStrategy(Enum):
-    """Estrategias de chunking para dividir el contenido de notas.
-
-    Cada estrategia produce distinta fragmentacion del contenido
-    y afecta la precision@K y MRR en la recuperacion.
-
-    Attributes:
-        FIXED: chunking por tamano fijo de tokens.
-        MARKDOWN: chunking por cabeceras markdown (#, ##, ###).
-        BACKLINK: chunking basado en relaciones de backlinks.
-    """
-
-    FIXED = "fixed"
-    MARKDOWN = "markdown"
-    BACKLINK = "backlink"
-
-    def __init__(self, value: str) -> None:
-        self._label: str = value.replace("_", " ").title()
-
-    @property
-    def label(self) -> str:
-        """Devuelve una etiqueta legible para logs y UI."""
-        return self._label
-
-
-class NoteType(Enum):
-    """Tipos de nota que se pueden encontrar en un vault de Obsidian.
-
-    Ayuda a categorizar el contenido y aplicar estrategias
-    de chunking diferentes segun el tipo.
-
-    Attributes:
-        DOC: Nota tipo documento o pagina wiki.
-        TODO: Lista de tareas pendientes.
-        MEETING: Nota de reunion con estructura de asistencia.
-        MINDMAP: Mapa mental o estructura jerarquica.
-        SNIPPET: Fragmento de codigo o referencia rapida.
-        OTHER: Cualquier otro tipo de nota no clasificada.
-    """
-
-    DOC = "doc"
-    TODO = "todo"
-    MEETING = "meeting"
-    MINDMAP = "mindmap"
-    SNIPPET = "snippet"
-    OTHER = "other"
-
-    def __init__(self, value: str) -> None:
-        labels = {
-            "doc": "Documento",
-            "todo": "Lista de tareas",
-            "meeting": "Reunion",
-            "mindmap": "Mapa mental",
-            "snippet": "Snippet de codigo",
-            "other": "Otro",
-        }
-        self._label: str = labels.get(value, value.title())
-
-    @property
-    def label(self) -> str:
-        """Devuelve una etiqueta legible para logs y UI."""
-        return self._label
