@@ -6,7 +6,6 @@ from src.adapters.obsidian_loader import ObsidianLoader
 from src.domain.models import NoteType
 from src.domain.ports import NoteNotFoundError, VaultWriteError
 
-
 # ---------------------------------------------------------------------------
 # load_all
 # ---------------------------------------------------------------------------

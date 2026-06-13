@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from src.adapters.chunkers.backlink_aware import BacklinkAwareChunker
 from src.adapters.chunkers.fixed_size import FixedSizeChunker
 from src.adapters.chunkers.markdown_header import MarkdownHeaderChunker
