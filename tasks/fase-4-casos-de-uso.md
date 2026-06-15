@@ -186,6 +186,11 @@ Todos los puertos mockeados con `MagicMock(spec=Port)`.
 
 ## Criterio de completado
 
-- [ ] `python scripts/ingest.py` indexa el vault completo sin errores
-- [ ] Los tres casos de uso tienen cobertura 100% en tests unitarios
-- [ ] `pytest tests/unit/test_ingest_vault.py tests/unit/test_search_notes.py tests/unit/test_manage_notes.py -v` pasa
+- [ ] `python scripts/ingest.py` indexa el vault completo sin errores (requiere Ollama)
+- [x] Los tres casos de uso tienen cobertura 100% en tests unitarios
+- [x] `pytest tests/unit/test_ingest_vault.py tests/unit/test_search_notes.py tests/unit/test_manage_notes.py -v` pasa (16/16)
+
+> **Nota de implementación**: La spec pedía inyectar `ChunkEmbedder` en los casos de
+> uso y pasarlo a `store.add_chunks(chunks, embedder)` / `store.search(query, embedder)`.
+> Se adaptó al puerto real (Fase 3), donde el embedder vive dentro del `VectorStore`.
+> `IngestVault(loader, chunker, store)` — sin embedder. Ver `docs/error-log.md`.

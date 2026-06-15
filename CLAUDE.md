@@ -83,7 +83,7 @@ Verify what exists before referencing it:
 find src -name "*.py" ! -name "__init__.py"
 ```
 
-As of `develop` (Fase 3 complete), files with real content:
+As of `feature/add-chromadb` (Fase 4 complete), files with real content:
 - `src/domain/models.py` — `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`
 - `src/domain/ports.py` — `NoteLoader`, `NoteWriter`, `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + full exception hierarchy
 - `src/adapters/obsidian_loader.py` — `ObsidianLoader`
@@ -94,11 +94,15 @@ As of `develop` (Fase 3 complete), files with real content:
 - `src/adapters/llm/groq_adapter.py` — `HuggingFaceEmbedderAdapter`, `GroqLLMAdapter`
 - `src/adapters/vector_stores/chroma_store.py` — `ChromaVectorStore`
 - `src/infrastructure/config.py` — factory: `get_llm`, `get_embedder`, `get_vector_store`, `get_note_loader`, `get_note_writer`, `get_chunker`, `get_chunker_from_env`
+- `src/application/ingest_vault.py` — `IngestVault` (loader+chunker+store; `execute()`, `execute_single()`)
+- `src/application/search_notes.py` — `SearchNotes` (store; `execute()`, `execute_text()`)
+- `src/application/manage_notes.py` — `ManageNotes` (loader+writer+ingest; `create()`, `update()`, `get()`)
 - `scripts/test_ollama_chat.py` — connectivity smoke test
-- `tests/unit/` — 57 tests passing (models, loader, chunkers, chroma_store, config)
+- `scripts/ingest.py` — CLI de ingesta (`python scripts/ingest.py [--strategy fixed|markdown|backlink]`)
+- `tests/unit/` — 73 tests passing (models, loader, chunkers, chroma_store, config, ingest_vault, search_notes, manage_notes)
 - `tests/integration/test_ollama_integration.py` — 3 tests `@integration` (require Ollama)
 
-`data/chroma_db/` is empty — the vault must be ingested before retrieval works.
+`data/chroma_db/` is empty — run `python scripts/ingest.py` (with Ollama running) to populate it.
 
 ## Error log
 

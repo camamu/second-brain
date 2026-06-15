@@ -153,3 +153,52 @@ Se descartó para mantener la spec como referencia canónica del TFM.
 Al cerrar cada fase, verificar que los nombres de puertos de la spec de la fase
 siguiente coinciden con el dominio actual. Si divergen, refactorizar el dominio
 en el mismo PR de cierre de fase (no dejarlo para la siguiente).
+
+---
+
+## [2026-06-15] Deriva de firmas entre Fase 3 (puertos) y la spec de Fase 4
+
+**Fase**: fase-4-casos-de-uso.md
+**Categoría**: arquitectura (recurrencia: tercera vez consecutiva)
+
+### Qué se hizo mal
+
+La spec `tasks/fase-4-casos-de-uso.md` se escribió antes de que en Fase 3 se
+decidiera inyectar el `ChunkEmbedder` en el constructor del `VectorStore`. Por
+eso la spec pedía pasar el embedder como parámetro a los casos de uso y a los
+métodos del puerto:
+
+| Spec Fase 4 | Puerto real (Fase 3) |
+|---|---|
+| `IngestVault(loader, chunker, embedder, store)` | `IngestVault(loader, chunker, store)` |
+| `store.add_chunks(chunks, embedder)` | `add_chunks(chunks)` — sin embedder |
+| `store.search(query, embedder)` | `search(query)` — sin embedder |
+| `SearchNotes(store, embedder)` | `SearchNotes(store)` |
+| `execute_text(strategy: ChunkStrategy = FIXED_SIZE)` | `execute_text(strategy: ChunkStrategy \| None = None)` |
+
+### Por qué era un error
+
+Seguir la spec literal habría introducido parámetros muertos (`embedder`) en la
+capa de aplicación y roto en runtime (el método `add_chunks` del puerto no
+acepta 2º argumento). Habría acoplado la capa de aplicación a un detalle de
+implementación que ya fue resuelto en el nivel del adaptador.
+
+### Cómo se corrigió
+
+Se detectó la divergencia en el análisis previo (antes de escribir código).
+Decisión: el puerto refactorizado de Fase 3 es la fuente de verdad. Los casos
+de uso no reciben ni manejan embedder; el `VectorStore` creado por la factory
+ya lo encapsula. `execute_text` acepta `ChunkStrategy | None` y traduce a
+`.value` al construir `RetrievalQuery` (cuyo campo es `Optional[str]`).
+
+**Alternativa descartada**: incluir `embedder` como parámetro muerto para
+respetar la firma de la spec. Se descartó porque crearía confusión en el lector
+del TFM y viola el principio de no exponer detalles de implementación en los
+puertos limpios.
+
+### Cómo evitarlo en el futuro
+
+Las specs de fases futuras deben revisarse contra el dominio **y** los puertos
+implementados antes de empezar la fase. Cualquier decisión de diseño tomada
+durante la implementación de una fase (como el patrón de inyección del embedder)
+debe reflejarse en las specs de las fases siguientes antes de cerrar el PR.
