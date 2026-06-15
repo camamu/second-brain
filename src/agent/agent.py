@@ -1,0 +1,107 @@
+"""Agente ReAct de Second Brain usando LangChain.
+
+El agente orquesta las tres herramientas (search_vault, create_note, edit_note)
+con un LLM y memoria de conversación para crear una experiencia conversacional
+sobre el vault de Obsidian.
+"""
+
+import logging
+
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain.memory import ConversationBufferWindowMemory
+from langchain.prompts import PromptTemplate
+from langchain_core.language_models import BaseLanguageModel
+
+from src.agent.tools import create_edit_tool, create_note_tool, create_search_tool
+from src.application.manage_notes import ManageNotes
+from src.application.search_notes import SearchNotes
+from src.domain.models import ChunkStrategy
+
+logger = logging.getLogger(__name__)
+
+_REACT_PROMPT_TEMPLATE = """\
+Eres un asistente de segundo cerebro que ayuda a gestionar un vault de Obsidian.
+Puedes buscar notas, crear nuevas notas y editar notas existentes.
+
+Reglas:
+- Usa search_vault ANTES de responder preguntas sobre el contenido del vault.
+- Responde en el idioma del usuario.
+- Sé conciso y cita la nota fuente cuando sea relevante.
+
+Herramientas disponibles:
+{tools}
+
+Formato de respuesta OBLIGATORIO:
+
+Thought: razona sobre qué acción tomar
+Action: <nombre exacto de la herramienta, una de: {tool_names}>
+Action Input: <input para la herramienta>
+Observation: <resultado de la herramienta>
+... (repite Thought/Action/Action Input/Observation si es necesario)
+Thought: Tengo la respuesta final
+Final Answer: <respuesta para el usuario>
+
+Historial de conversación:
+{chat_history}
+
+Pregunta del usuario: {input}
+{agent_scratchpad}"""
+
+_REACT_PROMPT = PromptTemplate(
+    input_variables=[
+        "tools",
+        "tool_names",
+        "input",
+        "agent_scratchpad",
+        "chat_history",
+    ],
+    template=_REACT_PROMPT_TEMPLATE,
+)
+
+
+def create_agent(
+    llm: BaseLanguageModel,
+    search_use_case: SearchNotes,
+    manage_use_case: ManageNotes,
+    strategy: ChunkStrategy = ChunkStrategy.FIXED_SIZE,
+) -> AgentExecutor:
+    """Construye el agente ReAct con las tres herramientas del vault.
+
+    Args:
+        llm: Modelo de lenguaje de LangChain (OllamaLLM o ChatGroq).
+        search_use_case: Caso de uso de búsqueda semántica.
+        manage_use_case: Caso de uso de gestión de notas.
+        strategy: Estrategia de chunking para search_vault.
+
+    Returns:
+        AgentExecutor listo para recibir preguntas del usuario.
+    """
+    tools = [
+        create_search_tool(search_use_case, strategy),
+        create_note_tool(manage_use_case),
+        create_edit_tool(manage_use_case),
+    ]
+
+    memory = ConversationBufferWindowMemory(
+        k=10,
+        memory_key="chat_history",
+        input_key="input",
+    )
+
+    agent = create_react_agent(llm=llm, tools=tools, prompt=_REACT_PROMPT)
+
+    executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        memory=memory,
+        verbose=True,
+        handle_parsing_errors=True,
+        max_iterations=5,
+    )
+
+    logger.info(
+        "Agente ReAct creado con %d herramientas, estrategia=%s",
+        len(tools),
+        strategy.value,
+    )
+    return executor

@@ -111,6 +111,10 @@ class OllamaLLMAdapter(ConversationalLLM):
         self._model = model
         self._llm = OllamaLLM(model=model, base_url=base_url)
 
+    def as_langchain(self):
+        """Devuelve el objeto LangChain subyacente para uso en el agente ReAct."""
+        return self._llm
+
     def generate(self, prompt: str, context: List[SearchResult]) -> str:
         """Genera respuesta en lenguaje natural a partir de contexto RAG.
 

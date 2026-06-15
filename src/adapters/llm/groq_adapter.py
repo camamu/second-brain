@@ -113,6 +113,10 @@ class GroqLLMAdapter(ConversationalLLM):
         self._model = model
         self._llm = ChatGroq(api_key=api_key, model=model)
 
+    def as_langchain(self):
+        """Devuelve el objeto LangChain subyacente para uso en el agente ReAct."""
+        return self._llm
+
     def generate(self, prompt: str, context: List[SearchResult]) -> str:
         """Genera respuesta en lenguaje natural a partir de contexto RAG.
 
