@@ -98,3 +98,58 @@ ruff format src/
 Tras cualquier resolución de conflictos, ejecutar `ruff check src/ --fix &&
 ruff format src/` localmente antes de hacer push. Añadirlo como paso del
 checklist de merge.
+
+---
+
+## [2026-06-15] Deriva de nombres entre Fase 2 (dominio) y la spec de Fase 3
+
+**Fase**: fase-3-vectorstore-llm.md
+**Categoría**: arquitectura (recurrencia del error de Fase 1→2)
+
+### Qué se hizo mal
+
+La spec `tasks/fase-3-vectorstore-llm.md` usaba nombres y firmas distintos a
+los puertos ya implementados y mergeados en Fase 2:
+
+| Spec Fase 3 | Dominio real (Fase 2) |
+|---|---|
+| `ChunkEmbedder` | `IEmbedder` |
+| `VectorStore` | `IVectorStore` |
+| `ConversationalLLM` | `ILLMChat` |
+| `add_chunks(chunks, embedder)` | `add_chunks(chunks)` |
+| `delete_by_note(id)` | `delete_by_note_id(id)` |
+| `count()` | `get_note_ids()` |
+| `generate(prompt, ctx)` | `respond(prompt, ctx)` |
+
+Además, la spec pedía pasar el embedder como argumento de `add_chunks`/`search`,
+lo que habría ensuciado el contrato del puerto `VectorStore`.
+
+### Por qué era un error
+
+Implementar directamente sobre la spec habría roto el dominio mergeado, los 44
+tests existentes, y habría acoplado el puerto `VectorStore` a ChromaDB (al
+exponer el embedder en la firma de métodos del puerto).
+
+### Cómo se corrigió
+
+Se detectó la divergencia antes de escribir código (lección del error-log de
+Fase 2). Decisiones tomadas:
+
+1. **La spec es la fuente de verdad** para nombres de puertos. Se refactorizó
+   el dominio: `IEmbedder→ChunkEmbedder`, `IVectorStore→VectorStore`,
+   `ILLMChat→ConversationalLLM`, `delete_by_note_id→delete_by_note`,
+   `get_note_ids→count`, `respond→generate`.
+2. **El embedder se inyecta en el constructor** de `ChromaVectorStore`, no por
+   argumento de método. Mantiene los métodos del puerto limpios.
+3. Se verificó que los tres puertos a renombrar no tenían usos fuera de
+   `ports.py` y `__init__.py` antes de hacer el refactor.
+4. Gate tras el refactor: `pytest tests/unit -q` → 44/44 verde.
+
+**Alternativa descartada**: mantener los nombres de Fase 2 y adaptar la spec.
+Se descartó para mantener la spec como referencia canónica del TFM.
+
+### Cómo evitarlo en el futuro
+
+Al cerrar cada fase, verificar que los nombres de puertos de la spec de la fase
+siguiente coinciden con el dominio actual. Si divergen, refactorizar el dominio
+en el mismo PR de cierre de fase (no dejarlo para la siguiente).

@@ -6,9 +6,9 @@ La capa de dominio no depende de ninguna tecnologa externa.
 Adaptadores:
     Document loaders     -> NoteLoader, NoteWriter
     Chunkers             -> BaseChunker
-    Embedders            -> IEmbedder
-    Vector store         -> IVectorStore
-    LLM chat             -> ILLMChat
+    Embedders            -> ChunkEmbedder
+    Vector store         -> VectorStore
+    LLM chat             -> ConversationalLLM
     Evaluation repo      -> IEvaluationRepo
 """
 
@@ -53,6 +53,10 @@ class VectorStoreError(ObsidianRagError):
 
 class VaultWriteError(ObsidianRagError):
     """Se lanza cuando falla la escritura de una nota en el vault."""
+
+
+class ConfigError(ObsidianRagError):
+    """Se lanza cuando falta o es inválida una variable de configuración."""
 
 
 class NoteLoader(ABC):
@@ -221,21 +225,12 @@ class BaseChunker(ABC):
         return result
 
 
-class IEmbedder(ABC):
+class ChunkEmbedder(ABC):
     """Interface para generar vectores de embeddings.
 
     Abstrace llamados a Ollama o HuggingFace para generar
     embeddings vectoriales a partir de textos cortos.
     """
-
-    @abstractmethod
-    def __init__(self, model_name: str) -> None:
-        """Inicializa el embedder con el modelo a usar.
-
-        Args:
-            model_name: Nombre del modelo de embedding.
-        """
-        ...
 
     @abstractmethod
     def embed(self, text: str) -> List[float]:
@@ -262,21 +257,12 @@ class IEmbedder(ABC):
         ...
 
 
-class IVectorStore(ABC):
+class VectorStore(ABC):
     """Interface para persistencia y busqueda vectorial.
 
     Abstrace ChromaDB para almacenar chunks con sus
     embeddings y buscarlos semanticamente.
     """
-
-    @abstractmethod
-    def __init__(self, persist_path: str) -> None:
-        """Inicializa el vector store en la ruta dada.
-
-        Args:
-            persist_path: Ruta para persistir ChromaDB.
-        """
-        ...
 
     @abstractmethod
     def add_chunks(self, chunks: List[Chunk]) -> None:
@@ -300,7 +286,7 @@ class IVectorStore(ABC):
         ...
 
     @abstractmethod
-    def delete_by_note_id(self, note_id: str) -> None:
+    def delete_by_note(self, note_id: str) -> None:
         """Elimina todos los chunks de una nota.
 
         Args:
@@ -309,16 +295,16 @@ class IVectorStore(ABC):
         ...
 
     @abstractmethod
-    def get_note_ids(self) -> List[str]:
-        """Devuelve los IDs de notas indexadas.
+    def count(self) -> int:
+        """Devuelve el total de chunks indexados.
 
         Returns:
-            Lista de IDs de notas indexadas actualmente.
+            Numero de chunks en el vector store.
         """
         ...
 
 
-class ILLMChat(ABC):
+class ConversationalLLM(ABC):
     """Interface para generar respuestas con un LLM.
 
     Abstrace llamados a Ollama (llama3.2, qwen3.6)
@@ -327,16 +313,7 @@ class ILLMChat(ABC):
     """
 
     @abstractmethod
-    def __init__(self, model_name: str) -> None:
-        """Inicializa el LLM con el modelo a usar.
-
-        Args:
-            model_name: Nombre del modelo de language model.
-        """
-        ...
-
-    @abstractmethod
-    def respond(self, prompt: str, context: List[SearchResult]) -> str:
+    def generate(self, prompt: str, context: List[SearchResult]) -> str:
         """Genera respuesta natural a partir de contexto.
 
         Args:
