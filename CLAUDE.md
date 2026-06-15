@@ -36,15 +36,18 @@ src/infrastructure/  → config loading (.env), dependency wiring
 
 **Domain entities** (`src/domain/models.py`): `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, plus enums `ChunkStrategy` and `NoteType`. All are `@dataclass(frozen=True)`.
 
-**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter`, `BaseChunker`, `IEmbedder`, `IVectorStore`, `ILLMChat`, `IEvaluationRepo`.
+**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter`, `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + exceptions `ObsidianRagError`, `NoteNotFoundError`, `ChunkingError`, `EmbeddingError`, `VectorStoreError`, `VaultWriteError`, `ConfigError`.
 
-**Implemented adapters** (Fase 2):
+**Implemented adapters** (Fase 2 + Fase 3):
 - `src/adapters/obsidian_loader.py` — `ObsidianLoader` (implements `NoteLoader` + `NoteWriter`)
 - `src/adapters/chunkers/fixed_size.py` — `FixedSizeChunker` + shared `split_text()`
 - `src/adapters/chunkers/markdown_header.py` — `MarkdownHeaderChunker`
 - `src/adapters/chunkers/backlink_aware.py` — `BacklinkAwareChunker` (injects `NoteLoader`)
 - `src/adapters/chunkers/base.py` — re-exports `BaseChunker` from domain
-- `src/adapters/llm/ollama_chat.py` — `OllamaChat` (wraps `ChatOllama`)
+- `src/adapters/llm/ollama_adapter.py` — `OllamaEmbedderAdapter` + `OllamaLLMAdapter`
+- `src/adapters/llm/groq_adapter.py` — `HuggingFaceEmbedderAdapter` + `GroqLLMAdapter`
+- `src/adapters/vector_stores/chroma_store.py` — `ChromaVectorStore` (1 collection/strategy, cosine)
+- `src/infrastructure/config.py` — composition root / factory (reads `.env`, lazy imports)
 
 ## Key conventions
 
@@ -63,8 +66,13 @@ Create a `.env` file with:
 USE_LOCAL=true              # true=Ollama, false=Groq+HuggingFace
 VAULT_PATH=                 # absolute path to Obsidian vault
 OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_LLM_MODEL=llama3.2   # LLM model name in Ollama
+OLLAMA_EMBED_MODEL=nomic-embed-text
 GROQ_API_KEY=               # only when USE_LOCAL=false
+GROQ_MODEL=llama-3.2-90b-text-preview
+HF_EMBED_MODEL=nomic-ai/nomic-embed-text-v1
 CHUNKER_STRATEGY=fixed      # fixed|markdown|backlink
+CHROMA_PERSIST_DIR=data/chroma_db  # where ChromaDB stores its files
 ```
 
 ## Current state
@@ -75,16 +83,20 @@ Verify what exists before referencing it:
 find src -name "*.py" ! -name "__init__.py"
 ```
 
-As of `feature/domain-refactor` (Fase 2 complete), files with real content:
-- `src/domain/models.py` — `Note` (+ `path`, `note_type`), `Chunk` (+ `heading`, `ChunkStrategy` enum), `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`
-- `src/domain/ports.py` — `NoteLoader`, `NoteWriter`, `BaseChunker`, `IEmbedder`, `IVectorStore`, `ILLMChat`, `IEvaluationRepo` + exception hierarchy
+As of `develop` (Fase 3 complete), files with real content:
+- `src/domain/models.py` — `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`
+- `src/domain/ports.py` — `NoteLoader`, `NoteWriter`, `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + full exception hierarchy
 - `src/adapters/obsidian_loader.py` — `ObsidianLoader`
 - `src/adapters/chunkers/fixed_size.py` — `FixedSizeChunker`, `split_text()`
 - `src/adapters/chunkers/markdown_header.py` — `MarkdownHeaderChunker`
 - `src/adapters/chunkers/backlink_aware.py` — `BacklinkAwareChunker`
-- `src/adapters/llm/ollama_chat.py` — `OllamaChat`
+- `src/adapters/llm/ollama_adapter.py` — `OllamaEmbedderAdapter`, `OllamaLLMAdapter`
+- `src/adapters/llm/groq_adapter.py` — `HuggingFaceEmbedderAdapter`, `GroqLLMAdapter`
+- `src/adapters/vector_stores/chroma_store.py` — `ChromaVectorStore`
+- `src/infrastructure/config.py` — factory: `get_llm`, `get_embedder`, `get_vector_store`, `get_note_loader`, `get_note_writer`, `get_chunker`, `get_chunker_from_env`
 - `scripts/test_ollama_chat.py` — connectivity smoke test
-- `tests/unit/test_models.py`, `test_obsidian_loader.py`, `test_chunkers.py` — 44 tests, all passing
+- `tests/unit/` — 57 tests passing (models, loader, chunkers, chroma_store, config)
+- `tests/integration/test_ollama_integration.py` — 3 tests `@integration` (require Ollama)
 
 `data/chroma_db/` is empty — the vault must be ingested before retrieval works.
 
