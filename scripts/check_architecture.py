@@ -50,8 +50,7 @@ def check_layer(layer: str, forbidden: list[str]) -> list[str]:
         for module in get_imports(py_file):
             for banned in forbidden:
                 is_src_banned = (
-                    module.startswith(f"src.{banned}.")
-                    or module == f"src.{banned}"
+                    module.startswith(f"src.{banned}.") or module == f"src.{banned}"
                 )
                 is_rel_banned = module.startswith(f"{banned}.")
                 if is_src_banned or is_rel_banned:
