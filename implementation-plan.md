@@ -1,266 +1,260 @@
-# Implementation Plan — Fase 3: Vector store y adaptadores LLM
+# Implementation Plan — Fase 4: Casos de uso (application layer)
 
 > Documento de planificación previo a la implementación (skill
 > `critical-task-planning`). Registro persistente y versionado del plan de la
-> Fase 3. El tracking en vivo del harness, si se usa, es efímero; este fichero es
+> Fase 4. El tracking en vivo del harness, si se usa, es efímero; este fichero es
 > la fuente de verdad del plan.
+>
+> El plan de la Fase 3 queda preservado en el historial de git (commit `1a6e62c`
+> y anteriores); este fichero se sobrescribe por fase.
 
 ## 1. Contexto y decisión de fondo
 
-La Fase 3 implementa la capa de persistencia vectorial (ChromaDB), los adaptadores
-LLM/embedder para los dos entornos (local Ollama / producción Groq+HuggingFace) y la
-factory (*composition root*) en `infrastructure`. Es lo que falta para poder ingestar
-el vault y hacer retrieval (hoy `data/chroma_db/` está vacío).
+La Fase 4 implementa la **capa de aplicación**: tres casos de uso que orquestan los
+puertos del dominio sin conocer ChromaDB, Ollama ni el filesystem. Es la primera capa
+que combina varios puertos a la vez, y el pegamento entre los adaptadores (Fase 2/3) y
+el agente (Fase 5). También entrega `scripts/ingest.py`, el primer punto que ejecuta la
+factory de extremo a extremo para indexar el vault real (hoy `data/chroma_db/` vacío).
 
-### Deriva spec ↔ dominio (recurrencia del error-log)
+### Deriva spec ↔ dominio (recurrencia del error-log, Fase 1→2 y 2→3)
 
-La spec `tasks/fase-3-vectorstore-llm.md` usa nombres y firmas que **no coinciden** con
-el dominio mergeado en Fase 2. Igual que ocurrió entre Fase 1→2, hay que resolver la
-divergencia *antes* de implementar (lección de `docs/error-log.md`).
+La spec `tasks/fase-4-casos-de-uso.md` se escribió **antes** del refactor de puertos de
+la Fase 3 (donde se decidió, con el usuario, inyectar el `ChunkEmbedder` en el
+constructor del `VectorStore`). Por tanto la spec asume firmas que ya no existen. Igual
+que en las dos fases anteriores, hay que resolver la divergencia *antes* de implementar
+(lección de `docs/error-log.md`).
 
-Divergencias detectadas:
+Divergencias detectadas (verificadas contra `src/domain/ports.py` y `models.py`):
 
-| Spec Fase 3 | Dominio real (`ports.py` / `models.py`) |
-|---|---|
-| `ChunkEmbedder` | `IEmbedder` |
-| `VectorStore` | `IVectorStore` |
-| `ConversationalLLM` | `ILLMChat` |
-| `add_chunks(chunks, embedder)` | `add_chunks(chunks)` — sin embedder |
-| `search(query, embedder)` | `search(query)` — sin embedder |
-| `delete_by_note(id)` | `delete_by_note_id(id)` |
-| `count()` | `get_note_ids()` |
-| `generate(prompt, ctx)` | `respond(prompt, ctx)` |
-| ctor embedder `model, base_url` | `__init__(model_name)` |
-| `query.text` | `RetrievalQuery.query` (el campo se llama `query`) |
-| dir `vector_store/` | dir real `vector_stores/` (plural, ya existe) |
+| Spec Fase 4 | Dominio real (Fase 3) | Resolución |
+|---|---|---|
+| `store.add_chunks(chunks, embedder)` | `VectorStore.add_chunks(chunks)` | quitar `embedder` del argumento |
+| `store.search(query, embedder)` | `VectorStore.search(query)` | quitar `embedder` del argumento |
+| `IngestVault(loader, chunker, embedder, store)` | el `store` ya tiene el embedder | quitar `embedder` del ctor (param muerto) |
+| `SearchNotes(store, embedder)` | el `store` ya tiene el embedder | quitar `embedder` del ctor (param muerto) |
+| `execute_text(..., strategy: ChunkStrategy = FIXED_SIZE)` | `RetrievalQuery.strategy: Optional[str]` | tipar el param como `ChunkStrategy \| None = None`; pasar `.value` (o `None`) a la query |
+| `scripts/ingest.py` instancia `embedder` y lo pasa | idem | el script no pasa `embedder` a `IngestVault` |
 
-### Decisiones cerradas (con el usuario)
+### Decisiones cerradas
 
-1. **Fuente de verdad → la spec.** Se refactoriza el dominio (puertos) a los nombres de
-   la spec: `IEmbedder→ChunkEmbedder`, `IVectorStore→VectorStore`,
-   `ILLMChat→ConversationalLLM`.
-2. **Embeddings → inyección en constructor** (NO el `add_chunks(chunks, embedder)` de la
-   spec). El `VectorStore` recibe el embedder en su `__init__`; `add_chunks`/`search`
-   quedan sin parámetro embedder. Mantiene los métodos del puerto limpios y desacopla el
-   puerto de ChromaDB.
-3. **`search()` con `strategy=None` → estrategia por defecto del store**, inyectada en el
-   constructor desde `CHUNKER_STRATEGY`.
+1. **Coherencia con el puerto refactorizado de Fase 3 = fuente de verdad** (por encima de
+   la firma literal de la spec de Fase 4). El embedder vive dentro del `VectorStore`; los
+   casos de uso **no** reciben ni manejan embedder. Esto mantiene el principio de la Fase 3
+   ("métodos del puerto limpios, embedder inyectado") y evita un parámetro muerto que
+   confundiría al lector del TFM.
+2. **`SearchNotes` queda como wrapper fino** sobre `store.search`. Aun siendo delgado, se
+   mantiene como caso de uso porque (a) añade logging del nº de resultados, (b) ofrece
+   `execute_text` para el agente (Fase 5), y (c) preserva la simetría de la capa.
+3. **`execute_text` acepta `ChunkStrategy | None`** (API tipada para el agente) y traduce
+   internamente a `str`/`None` al construir el `RetrievalQuery` (cuyo campo es `Optional[str]`).
+4. **`execute_single` borra antes de indexar** (delete → chunk → add) para evitar chunks
+   huérfanos al reindexar una nota editada. (Decisión ya registrada en
+   `critical-task-planning.md`, fila "formato de ID de los Chunks".)
 
-Verificado: los tres puertos a renombrar solo aparecen en `src/domain/ports.py` y
-`src/domain/__init__.py`; ningún adapter ni test los importa → refactor contenido y
-seguro. Todas las dependencias ya están instaladas (`chromadb==0.6.3`,
-`langchain-ollama`, `langchain-groq`, `huggingface_hub`, `python-dotenv`).
+Verificado: `src/application/` está vacío (solo `__init__.py`); no hay nada que romper.
+Los puertos a consumir existen con estas firmas: `NoteLoader.load_all()/load_by_id()`,
+`NoteWriter.create(title, content, tags)/update(note_id, content)`,
+`BaseChunker.chunk_many(notes)`, `VectorStore.add_chunks(chunks)/search(query)/delete_by_note(note_id)`,
+`RetrievalQuery(query, top_k=5, min_score=0.0, strategy: Optional[str]=None)`.
 
 ## 2. Mapa de cambios
-
-### Refactor del dominio (`src/domain/ports.py` + `src/domain/__init__.py`)
-
-| Antes (puerto actual) | Después (spec) |
-|---|---|
-| `class IEmbedder` | `class ChunkEmbedder` |
-| `class IVectorStore` | `class VectorStore` |
-| `class ILLMChat` | `class ConversationalLLM` |
-| `IVectorStore.delete_by_note_id(id)` | `VectorStore.delete_by_note(id)` |
-| `IVectorStore.get_note_ids() -> List[str]` | `VectorStore.count() -> int` |
-| `ILLMChat.respond(prompt, context)` | `ConversationalLLM.generate(prompt, context)` |
-
-- Quitar los `@abstractmethod __init__` de los tres puertos refactorizados: cada adapter
-  tiene un constructor distinto (Ollama `model, base_url`; HF `model_name`; `VectorStore`
-  `persist_path, embedder, default_strategy`). El puerto fija comportamiento, no constructor.
-- `ChunkEmbedder`: `embed(text) -> list[float]`, `embed_many(texts) -> list[list[float]]`.
-- `VectorStore`: `add_chunks(chunks) -> None`, `search(query) -> list[SearchResult]`,
-  `delete_by_note(note_id) -> None`, `count() -> int`.
-- `ConversationalLLM`: `generate(prompt: str, context: List[SearchResult]) -> str`.
-- Añadir excepción `ConfigError(ObsidianRagError)` (skill `config-management`).
-- Actualizar imports/`__all__` en `src/domain/__init__.py` y docstring de cabecera de `ports.py`.
 
 ### Ficheros nuevos
 
 | Fichero | Contenido |
 |---|---|
-| `src/adapters/vector_stores/chroma_store.py` | `ChromaVectorStore(VectorStore)` |
-| `src/adapters/llm/ollama_adapter.py` | `OllamaEmbedderAdapter(ChunkEmbedder)` + `OllamaLLMAdapter(ConversationalLLM)` |
-| `src/adapters/llm/groq_adapter.py` | `HuggingFaceEmbedderAdapter(ChunkEmbedder)` + `GroqLLMAdapter(ConversationalLLM)` |
-| `src/infrastructure/config.py` | factory / composition root |
-| `tests/unit/test_chroma_store.py` | tests unitarios con `FakeEmbedder` |
-| `tests/unit/test_config.py` | tests de la factory (mock de env) |
-| `tests/integration/test_ollama_integration.py` | tests `@pytest.mark.integration` |
+| `src/application/ingest_vault.py` | `IngestVault` (orquesta loader+chunker+store) |
+| `src/application/search_notes.py` | `SearchNotes` (wrapper de `store.search`) |
+| `src/application/manage_notes.py` | `ManageNotes` (writer + reindex vía `IngestVault`) |
+| `scripts/ingest.py` | CLI de ingesta del vault completo (con `--strategy`) |
+| `tests/unit/test_ingest_vault.py` | tests con puertos `MagicMock(spec=...)` |
+| `tests/unit/test_search_notes.py` | tests del wrapper y `execute_text` |
+| `tests/unit/test_manage_notes.py` | tests de create/update/get + reindex |
 
-> Se usa el directorio existente `src/adapters/vector_stores/` (plural, ya creado y
-> documentado en CLAUDE.md), no el `vector_store/` singular de la spec. Embedders y LLM se
-> agrupan por proveedor en `llm/` según la spec; el dir vacío `embedders/` queda sin usar
-> (limpieza fuera de alcance).
+### Firmas finales (antes → después respecto a la spec)
+
+| Spec Fase 4 | Plan (implementado) |
+|---|---|
+| `IngestVault(loader, chunker, embedder, store)` | `IngestVault(loader, chunker, store)` |
+| `store.add_chunks(chunks, embedder)` | `store.add_chunks(chunks)` |
+| `SearchNotes(store, embedder)` | `SearchNotes(store)` |
+| `store.search(query, embedder)` | `store.search(query)` |
+| `execute_text(text, top_k=5, strategy: ChunkStrategy=FIXED_SIZE)` | `execute_text(text, top_k=5, strategy: ChunkStrategy \| None = None)` |
+
+> No se modifica el dominio en esta fase: el refactor ya se hizo en Fase 3. La
+> divergencia se resuelve adaptando la spec de Fase 4 al puerto, no al revés.
 
 ## 3. Especificación de componentes
 
-### `ChromaVectorStore(VectorStore)`
+### `IngestVault` (`src/application/ingest_vault.py`)
 
-- `__init__(self, persist_path: str, embedder: ChunkEmbedder, default_strategy: ChunkStrategy, collection_prefix: str = "obsidian_rag", client=None)`.
-  - `client` opcional para tests (in-memory). Default: `chromadb.PersistentClient(path=persist_path)`.
-- Colección por estrategia: nombre `f"{collection_prefix}_{strategy.value}"`. Crear/obtener
-  con `metadata={"hnsw:space": "cosine"}`.
-- `add_chunks(chunks)`:
-  1. Agrupar por `chunk.strategy` (defensivo).
-  2. Por grupo: `get_or_create_collection`, `embedder.embed_many([c.content ...])`.
-  3. `collection.upsert(ids, embeddings, documents, metadatas)`.
-  4. metadatas: `note_id`, `heading` (o `""`), `strategy` (=`.value`), `index`,
-     `token_count` + aplanar `chunk.metadata` (ChromaDB solo acepta str/int/float/bool;
-     listas como `tags` → join por comas). Fallos → `VectorStoreError`.
-- `search(query)`:
-  1. Resolver estrategia: `query.strategy` (str) → `ChunkStrategy(query.strategy)`; si
-     `None` → `self._default_strategy`. Valor inválido → `VectorStoreError`.
-  2. `embedder.embed(query.query)` → `collection.query(query_embeddings=[v], n_results=query.top_k)`.
-  3. Mapear a `SearchResult`: `score = max(0.0, min(1.0, 1 - distance))`, filtrar por
-     `query.min_score`, ordenar desc, `rank` 1-based.
-  4. Colección inexistente / vacía → devolver `[]` (no error).
-- `delete_by_note(note_id)`: en cada colección existente, `collection.delete(where={"note_id": note_id})`.
-- `count()`: suma de `collection.count()` de todas las colecciones del prefijo.
+- `__init__(self, loader: NoteLoader, chunker: BaseChunker, store: VectorStore) -> None`.
+- `execute() -> int`:
+  1. `notes = self._loader.load_all()`.
+  2. Si `not notes` → `logger.warning(...)`, `return 0`.
+  3. `chunks = self._chunker.chunk_many(notes)`.
+  4. Si `not chunks` → `logger.warning(...)`, `return 0`.
+  5. `self._store.add_chunks(chunks)`.
+  6. `logger.info("Ingested %d notes -> %d chunks", len(notes), len(chunks))`.
+  7. `return len(chunks)`.
+- `execute_single(note_id: str) -> int`:
+  1. `note = self._loader.load_by_id(note_id)` (propaga `NoteNotFoundError`).
+  2. `self._store.delete_by_note(note_id)` (borra chunks viejos primero).
+  3. `chunks = self._chunker.chunk_many([note])`.
+  4. `self._store.add_chunks(chunks)`.
+  5. `logger.info(...)`; `return len(chunks)`.
+- No captura `VectorStoreError`/`ChunkingError`: se propagan al llamador (script/agente).
 
-### `ollama_adapter.py`
+### `SearchNotes` (`src/application/search_notes.py`)
 
-- `OllamaEmbedderAdapter`: ctor `model="nomic-embed-text", base_url="http://localhost:11434"`;
-  envuelve `langchain_ollama.OllamaEmbeddings`. `embed`→`embed_query`, `embed_many`→`embed_documents`.
-  Errores → `EmbeddingError`.
-- `OllamaLLMAdapter`: ctor `model="llama3.2", base_url=...`; envuelve `langchain_ollama.OllamaLLM`.
-  `generate` formatea el prompt RAG (template de la spec) con `context` (lista de
-  `SearchResult` → texto con `[note_id]` para citación) y llama a `llm.invoke`.
+- `__init__(self, store: VectorStore) -> None`.
+- `execute(query: RetrievalQuery) -> list[SearchResult]`:
+  1. `results = self._store.search(query)`.
+  2. `logger.info("Search '%s' -> %d results", query.query, len(results))`.
+  3. `return results`.
+- `execute_text(self, text: str, top_k: int = 5, strategy: ChunkStrategy | None = None) -> list[SearchResult]`:
+  1. `strategy_value = strategy.value if strategy else None`.
+  2. `query = RetrievalQuery(query=text, top_k=top_k, strategy=strategy_value)`.
+  3. `return self.execute(query)`.
 
-### `groq_adapter.py`
+### `ManageNotes` (`src/application/manage_notes.py`)
 
-- `HuggingFaceEmbedderAdapter`: ctor `model_name="nomic-ai/nomic-embed-text-v1"`;
-  envuelve `langchain_huggingface.HuggingFaceEmbeddings`. Misma interfaz.
-- `GroqLLMAdapter`: ctor `api_key: str, model="llama-3.2-90b-text-preview"`;
-  envuelve `langchain_groq.ChatGroq`. Mismo template que Ollama.
+- `__init__(self, loader: NoteLoader, writer: NoteWriter, ingest: IngestVault) -> None`.
+- `create(title: str, content: str, tags: list[str]) -> Note`:
+  1. `note = self._writer.create(title, content, tags)`.
+  2. `self._ingest.execute_single(note.id)`.
+  3. `logger.info(...)`; `return note`.
+- `update(note_id: str, content: str) -> Note`:
+  1. `note = self._writer.update(note_id, content)`.
+  2. `self._ingest.execute_single(note.id)`; `logger.info(...)`; `return note`.
+- `get(note_id: str) -> Note`: `return self._loader.load_by_id(note_id)`.
 
-### `infrastructure/config.py` (composition root)
+### `scripts/ingest.py`
 
-- `load_dotenv()` a nivel de módulo; único fichero con `os.getenv()`.
-- Imports de adaptadores **lazy** (dentro de cada función) para no exigir Groq en local.
-- Helpers seguros `_get_bool`, `_require` (lanza `ConfigError` si falta var obligatoria).
-- Factories: `get_llm()`, `get_embedder()`, `get_vector_store()` (inyecta `get_embedder()` +
-  estrategia de `CHUNKER_STRATEGY`), `get_note_loader()`, `get_note_writer()`,
-  `get_chunker(strategy)`, `get_chunker_from_env()`.
-- `BacklinkAwareChunker` recibe `get_note_loader()`.
-- Mapeo `CHUNKER_STRATEGY` → `ChunkStrategy(value)` (valores `fixed|markdown|backlink`).
-- Env: `USE_LOCAL`, `VAULT_PATH`, `OLLAMA_BASE_URL`, `GROQ_API_KEY`, `CHUNKER_STRATEGY`,
-  `CHROMA_PERSIST_DIR` (default `data/chroma_db`).
+- Punto de entrada → **sí** puede importar de `infrastructure` y `application`.
+- `argparse` con `--strategy {fixed,markdown,backlink}` opcional.
+  - Sin flag → `get_chunker_from_env()`.
+  - Con flag → `get_chunker(ChunkStrategy(value))`.
+- `loader = get_note_loader()`, `chunker`, `store = get_vector_store()`.
+- `ingest = IngestVault(loader, chunker, store)`; `count = ingest.execute()`; log final.
 
 ## 4. Tests
 
-### `tests/unit/test_chroma_store.py`
-- `FakeEmbedder(ChunkEmbedder)`: vector determinista por `hash(text)` con `random.seed`
-  fijo, dimensión fija (p.ej. 8). Sin red.
-- Inyectar `client=chromadb.Client()` (in-memory) en el constructor.
-- Tests: `test_chroma_store_add_chunks_persists_documents`,
-  `test_chroma_store_add_chunks_upserts_duplicates`,
-  `test_chroma_store_search_returns_ranked_results`,
-  `test_chroma_store_search_respects_top_k`,
-  `test_chroma_store_search_uses_correct_collection_per_strategy`,
-  `test_chroma_store_delete_by_note_removes_all_chunks`,
-  `test_chroma_store_count_returns_total_across_collections`.
+Todos con puertos mockeados `MagicMock(spec=Port)`, patrón AAA, naming
+`test_<class>_<method>_<expected>` (skill `testing-strategy`).
 
-### `tests/unit/test_config.py`
-- `monkeypatch.setenv` para `USE_LOCAL`; verificar tipos con `isinstance`:
-  `test_get_llm_returns_ollama_when_local`, `test_get_llm_returns_groq_when_not_local`,
-  `test_get_embedder_returns_ollama_when_local`,
-  `test_get_chunker_returns_correct_type_for_each_strategy`.
-- Groq: mock de la clase para no instanciar cliente real / pedir API key.
+### `tests/unit/test_ingest_vault.py`
+- `test_ingest_vault_execute_loads_all_notes`
+- `test_ingest_vault_execute_chunks_all_notes`
+- `test_ingest_vault_execute_adds_chunks_to_store`
+- `test_ingest_vault_execute_returns_chunk_count`
+- `test_ingest_vault_execute_empty_vault_returns_zero` (loader devuelve `[]`)
+- `test_ingest_vault_execute_no_chunks_returns_zero` (chunker devuelve `[]`)
+- `test_ingest_vault_execute_single_reindexes_one_note`
+- `test_ingest_vault_execute_single_deletes_old_chunks_first`
+  (verificar orden: `delete_by_note` llamado **antes** que `add_chunks`)
 
-### `tests/integration/test_ollama_integration.py` (`@pytest.mark.integration`)
-- `test_ollama_embedder_returns_vector_of_expected_dimension`,
-  `test_ollama_llm_generates_nonempty_response`,
-  `test_full_pipeline_ingest_and_search` (nota → chunk → embed → store → search).
+### `tests/unit/test_search_notes.py`
+- `test_search_notes_execute_delegates_to_store`
+- `test_search_notes_execute_returns_store_results`
+- `test_search_notes_execute_text_builds_query_correctly` (verifica `query`, `top_k`)
+- `test_search_notes_execute_text_translates_strategy_to_value`
+  (pasar `ChunkStrategy.MARKDOWN_HEADER` → `RetrievalQuery.strategy == "markdown"`)
+- `test_search_notes_execute_text_none_strategy_passes_none`
 
-Naming `test_<class>_<method>_<expected>`, patrón AAA, mockear puertos con `spec=`
-(skill `testing-strategy`).
+### `tests/unit/test_manage_notes.py`
+- `test_manage_notes_create_writes_and_reindexes`
+- `test_manage_notes_update_writes_and_reindexes`
+- `test_manage_notes_get_delegates_to_loader`
 
 ## 5. Bloques "Análisis previo" (puntos arriesgados)
 
-### Análisis previo: normalización de score ChromaDB → SearchResult
-**Aspecto crítico**: `SearchResult.__post_init__` exige `0.0 ≤ score ≤ 1.0`; ChromaDB
-devuelve *distancias* y con la métrica por defecto (L2) el rango no está acotado a [0,1].
+### Análisis previo: embedder en los casos de uso (deriva spec ↔ puerto)
+**Aspecto crítico**: la spec de Fase 4 inyecta `ChunkEmbedder` en `IngestVault`/`SearchNotes`
+y lo pasa a `add_chunks`/`search`, pero el puerto `VectorStore` (refactor Fase 3) ya
+contiene el embedder y sus métodos no lo aceptan.
 **Opciones consideradas**:
-1. Métrica por defecto + normalización ad-hoc — frágil, puede salirse de [0,1].
-2. Crear colecciones con `hnsw:space=cosine` → distancia coseno ∈ [0,2], `score = 1 - distance`
-   con clamp a [0,1].
-**Decisión**: Opción 2 — el clamp evita romper la validación por redondeo y el coseno es el
-estándar para embeddings de texto.
-**Riesgo aceptado**: si una colección se creó con otra métrica, el espacio no cambia.
-Mitigación: prefijo de colección fijo; borrar `data/chroma_db/` si se cambia la métrica.
+1. Seguir la spec literal: añadir `embedder` al ctor aunque no se use → parámetro muerto,
+   acopla la capa de aplicación a un concepto que el puerto ya resolvió, y rompería en
+   runtime (`add_chunks` no acepta 2º argumento).
+2. Adaptar la spec al puerto: los casos de uso no conocen el embedder; el `store` (creado
+   por la factory con su embedder) basta.
+**Decisión**: Opción 2 — coherente con la decisión cerrada de Fase 3 y con el contrato
+real del puerto; mantiene la capa de aplicación dependiendo solo de abstracciones limpias.
+**Riesgo aceptado**: la spec de Fase 4 queda desactualizada respecto al código. Mitigación:
+documentar la deriva en `docs/error-log.md` y marcar los criterios en la spec.
 
-### Análisis previo: inyección del embedder en el VectorStore
-**Aspecto crítico**: el puerto no pasa embedder y `Chunk` no tiene campo embedding.
+### Análisis previo: tipo de `strategy` en `execute_text`
+**Aspecto crítico**: `RetrievalQuery.strategy` es `Optional[str]`, pero la spec tipa el
+param de `execute_text` como `ChunkStrategy`.
 **Opciones consideradas**:
-1. Pasar embedder por método (`add_chunks(chunks, embedder)`) — sigue la spec pero ensucia
-   el puerto y obliga al llamador a tener el embedder.
-2. Inyección en constructor — el `VectorStore` posee el embedder; métodos limpios.
-**Decisión**: Opción 2 (acordada con el usuario) — desacopla el puerto de ChromaDB.
-**Riesgo aceptado**: una instancia de store queda atada a un embedder/estrategia; aceptable
-para el alcance del TFM (una instancia por colección/modelo).
+1. Aceptar `str` directamente → simple pero sin seguridad de tipos para el agente.
+2. Aceptar `ChunkStrategy | None` y traducir a `.value` → API tipada, error temprano.
+**Decisión**: Opción 2 — el agente (Fase 5) trabaja con el enum; la traducción a `str`
+se encapsula en el caso de uso, respetando el tipo del campo del dominio.
+**Riesgo aceptado**: ninguno relevante; `None` se delega a la estrategia por defecto del store.
 
-### Colección por estrategia
-Decisión ya registrada en `critical-task-planning.md`: *"Estrategia de chunking activa →
-una colección ChromaDB por estrategia (elegido)"*. Permite los 3 índices en paralelo para
-la evaluación comparativa de Fase 7.
+### Orden delete→add en `execute_single`
+Decisión ya registrada en `critical-task-planning.md`: *"borrar todos los chunks de la
+nota antes de reindexar"*. Evita chunks huérfanos cuando una nota cambia de nº de chunks.
 
 ## 6. Orden de ejecución (con gates)
 
-1. (Hecho) Crear este `implementation-plan.md`.
-2. Refactor dominio (`ports.py` + `__init__.py`) → **gate**: `pytest tests/unit -q` (44 verdes).
-3. `ChromaVectorStore` + `test_chroma_store.py` → **gate**: `pytest tests/unit/test_chroma_store.py -v`.
-4. `ollama_adapter.py` y `groq_adapter.py`.
-5. `config.py` + `test_config.py` → **gate**: `pytest tests/unit/test_config.py -v`.
-6. `test_ollama_integration.py` → **gate** (requiere Ollama): `pytest tests/integration -v -m integration`.
-7. **gate final**: `ruff check src/ tests/ --fix && ruff format src/ tests/` y `pytest tests/unit -q`.
-8. Sincronizar docs: `CLAUDE.md` (estado/adapters Fase 3), `CHROMA_PERSIST_DIR`,
-   criterios en `tasks/fase-3-vectorstore-llm.md`, y entrada en `docs/error-log.md` por la
-   recurrencia de la deriva spec↔dominio (Fase 2→3) y la decisión de refactorizar a la spec.
+1. (Hecho) Crear este `implementation-plan.md`. Verificar firma de `get_vector_store`
+   y `get_chunker` en `config.py` para cablear bien `scripts/ingest.py --strategy`.
+2. `IngestVault` + `test_ingest_vault.py` → **gate**: `pytest tests/unit/test_ingest_vault.py -v`.
+3. `SearchNotes` + `test_search_notes.py` → **gate**: `pytest tests/unit/test_search_notes.py -v`.
+4. `ManageNotes` + `test_manage_notes.py` → **gate**: `pytest tests/unit/test_manage_notes.py -v`.
+5. `scripts/ingest.py` (depende de los tres casos de uso y de la factory).
+6. **gate final**: `ruff check src/ tests/ scripts/ --fix && ruff format src/ tests/ scripts/`
+   y `pytest tests/unit -q` (todos verdes, incluidos los 57 previos).
+7. (Manual, requiere Ollama + vault real) `python scripts/ingest.py` indexa sin errores.
+8. Sincronizar docs: `CLAUDE.md`, criterios en `tasks/fase-4-casos-de-uso.md`,
+   entrada en `docs/error-log.md` (deriva spec↔dominio Fase 3→4).
 
 ## 7. Criterio de completado
 
-- [x] Dominio refactorizado; los 44 tests previos siguen verdes.
-- [x] ChromaDB persiste y recupera chunks (colección por estrategia, score normalizado).
-- [x] Los dos adaptadores LLM/embedder implementan los puertos y traducen excepciones.
-- [x] La factory devuelve el adapter correcto según `USE_LOCAL` (imports lazy).
-- [x] `pytest tests/unit/test_chroma_store.py tests/unit/test_config.py -v` pasa.
-- [ ] `pytest tests/integration/ -v -m integration` pasa (con Ollama arriba).
-- [x] `ruff check` y `ruff format` limpios; docs sincronizadas.
+- [x] Los tres casos de uso implementados; importan **solo** de `src.domain.*`.
+- [x] Ningún caso de uso instancia adaptadores ni recibe/usa `embedder`.
+- [x] `execute_single` borra antes de añadir (test del orden verde).
+- [x] `execute_text` traduce `ChunkStrategy → str` correctamente.
+- [x] `pytest tests/unit/test_ingest_vault.py tests/unit/test_search_notes.py tests/unit/test_manage_notes.py -v` pasa.
+- [ ] `python scripts/ingest.py` indexa el vault completo sin errores (manual, con Ollama).
+- [x] `ruff check` y `ruff format` limpios; docs sincronizadas; error-log actualizado.
 
 ## 8. TODOs por funcionalidad
 
-### 🧩 Dominio (refactor a la spec)
-- [x] Renombrar puertos `IEmbedder→ChunkEmbedder`, `IVectorStore→VectorStore`, `ILLMChat→ConversationalLLM`.
-- [x] Renombrar métodos `delete_by_note_id→delete_by_note`, `get_note_ids→count`, `respond→generate`; quitar `__init__` abstractos.
-- [x] Añadir `ConfigError(ObsidianRagError)`.
-- [x] Actualizar `src/domain/__init__.py` (imports/`__all__`) y docstring de `ports.py`.
-- [x] Gate: `pytest tests/unit -q` verde.
+### 🧩 Casos de uso — Ingesta
+- [x] `IngestVault.__init__(loader, chunker, store)` (sin embedder).
+- [x] `execute()` con guardas de vault vacío / sin chunks y logging.
+- [x] `execute_single(note_id)` con orden delete → chunk → add.
 
-### 🗄️ Vector store (ChromaDB)
-- [x] `ChromaVectorStore` con colección por estrategia (`hnsw:space=cosine`), embedder inyectado, `client` opcional.
-- [x] `add_chunks` (group + upsert + metadatas saneados).
-- [x] `search` (default_strategy, score clamp, filtro min_score, rank).
-- [x] `delete_by_note` y `count`.
+### 🔎 Casos de uso — Búsqueda
+- [x] `SearchNotes.__init__(store)` (sin embedder).
+- [x] `execute(query)` con logging.
+- [x] `execute_text(text, top_k, strategy: ChunkStrategy | None)` con traducción a `.value`.
 
-### 🔌 Adaptadores LLM/Embedder
-- [x] `OllamaEmbedderAdapter` + `OllamaLLMAdapter` en `ollama_adapter.py`.
-- [x] `HuggingFaceEmbedderAdapter` + `GroqLLMAdapter` en `groq_adapter.py`.
-- [x] Template RAG compartido + traducción de excepciones (`EmbeddingError`).
+### ✍️ Casos de uso — Gestión de notas
+- [x] `ManageNotes.__init__(loader, writer, ingest)`.
+- [x] `create` / `update` con reindex vía `execute_single`.
+- [x] `get` delegando en `loader.load_by_id`.
 
-### 🏭 Factory (infrastructure)
-- [x] `config.py` con `load_dotenv`, helpers seguros, `ConfigError`, imports lazy.
-- [x] Las 7 factories, inyección de embedder/estrategia/loader.
+### 🖥️ Script CLI
+- [x] `scripts/ingest.py` con `argparse --strategy` y wiring vía factory.
+- [x] Coherencia chunker ↔ store: `--strategy` sobreescribe `CHUNKER_STRATEGY` en env antes de instanciar la factory.
 
 ### 🧪 Tests
-- [x] `FakeEmbedder` + `test_chroma_store.py` (7 tests).
-- [x] `test_config.py` (6 tests, mock env).
-- [ ] `test_ollama_integration.py` (3 tests `@integration`, requiere Ollama).
+- [x] `test_ingest_vault.py` (8 tests, incl. orden delete-antes-de-add).
+- [x] `test_search_notes.py` (5 tests, incl. traducción de strategy).
+- [x] `test_manage_notes.py` (3 tests).
+- [x] Gate: `pytest tests/unit -q` verde (57 previos + 16 nuevos = 73/73).
 
 ### 📚 Documentación y sincronización
-- [ ] Actualizar `CLAUDE.md` (adapters/estado Fase 3) y doc de `CHROMA_PERSIST_DIR`.
-- [ ] Marcar criterios en `tasks/fase-3-vectorstore-llm.md`.
-- [x] Entrada en `docs/error-log.md` (recurrencia deriva spec↔dominio).
+- [x] Actualizar `CLAUDE.md` (capa `application/` y `scripts/ingest.py`).
+- [x] Marcar criterios en `tasks/fase-4-casos-de-uso.md`.
+- [x] Entrada en `docs/error-log.md` (recurrencia deriva spec↔dominio, Fase 3→4).
 
 ### ✅ Verificación final
-- [x] `ruff check src/ tests/ --fix && ruff format src/ tests/`.
-- [x] `pytest tests/unit -q` (57/57).
-- [ ] `pytest tests/integration/ -v -m integration` (requiere Ollama).
+- [x] `ruff check src/ tests/ scripts/ --fix && ruff format ...`.
+- [x] `pytest tests/unit -q` verde (73/73).
+- [ ] (Manual) `python scripts/ingest.py` indexa el vault (requiere Ollama + vault).
