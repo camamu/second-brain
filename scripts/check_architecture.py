@@ -49,7 +49,7 @@ def check_layer(layer: str, forbidden: list[str]) -> list[str]:
     for py_file in layer_dir.rglob("*.py"):
         for module in get_imports(py_file):
             for banned in forbidden:
-                if module.startswith(f"src.{banned}") or module.startswith(
+                if module.startswith(f"src.{banned}.") or module == f"src.{banned}" or module.startswith(
                     f"{banned}."
                 ):
                     rel = py_file.relative_to(ROOT)
