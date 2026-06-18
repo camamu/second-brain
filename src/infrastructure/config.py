@@ -128,8 +128,12 @@ def get_embedder() -> ChunkEmbedder:
         return HuggingFaceEmbedderAdapter(model_name=model_name)
 
 
-def get_vector_store() -> VectorStore:
-    """Devuelve el ChromaVectorStore con embedder y estrategia del entorno.
+def get_vector_store(strategy: ChunkStrategy | None = None) -> VectorStore:
+    """Devuelve el ChromaVectorStore con embedder y estrategia.
+
+    Args:
+        strategy: Estrategia de chunking que determina la colección ChromaDB.
+            Si es None, lee CHUNKER_STRATEGY del entorno (default "fixed").
 
     Returns:
         ChromaVectorStore configurado con el embedder y la estrategia activa.
@@ -140,17 +144,21 @@ def get_vector_store() -> VectorStore:
     from src.adapters.vector_stores.chroma_store import ChromaVectorStore
 
     persist_dir = os.getenv("CHROMA_PERSIST_DIR", "data/chroma_db")
-    strategy = _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
+    resolved = (
+        strategy
+        if strategy is not None
+        else _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
+    )
     embedder = get_embedder()
     logger.info(
         "VectorStore: ChromaVectorStore (persist_dir=%s, strategy=%s)",
         persist_dir,
-        strategy,
+        resolved,
     )
     return ChromaVectorStore(
         persist_path=persist_dir,
         embedder=embedder,
-        default_strategy=strategy,
+        default_strategy=resolved,
     )
 
 
