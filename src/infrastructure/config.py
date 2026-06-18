@@ -92,6 +92,19 @@ def get_llm() -> ConversationalLLM:
         return GroqLLMAdapter(api_key=api_key, model=model)
 
 
+def get_langchain_llm():
+    """Devuelve el LLM nativo de LangChain (OllamaLLM o ChatGroq) para el agente.
+
+    Returns:
+        BaseLanguageModel: Instancia lista para usar en create_react_agent.
+
+    Raises:
+        ConfigError: Si USE_LOCAL=false y GROQ_API_KEY no está definida.
+    """
+    llm = get_llm()
+    return llm.as_langchain()  # type: ignore[attr-defined]
+
+
 def get_embedder() -> ChunkEmbedder:
     """Devuelve el adaptador de embeddings según USE_LOCAL.
 
