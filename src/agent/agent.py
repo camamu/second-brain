@@ -25,6 +25,11 @@ Puedes buscar notas, crear nuevas notas y editar notas existentes.
 
 Reglas:
 - Usa search_vault ANTES de responder preguntas sobre el contenido del vault.
+- FLUJO OBLIGATORIO PARA EDITAR: (1) llama search_vault UNA sola vez,
+  (2) toma el note_id exacto del primer resultado: el valor entre "nota: " y ",",
+  (3) llama edit_note INMEDIATAMENTE con ese note_id. No vuelvas a buscar.
+- El campo content de edit_note debe contener SOLO el texto limpio de la nota.
+  Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
 
@@ -96,7 +101,7 @@ def create_agent(
         memory=memory,
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=5,
+        max_iterations=10,
     )
 
     logger.info(

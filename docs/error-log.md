@@ -156,6 +156,78 @@ en el mismo PR de cierre de fase (no dejarlo para la siguiente).
 
 ---
 
+## [2026-06-18] Modelos incompatibles con el agente ReAct en operaciones de escritura
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: compatibilidad de modelo
+
+### Qué ocurre
+
+Al usar `llama3.2` (3B parámetros) para operaciones de escritura (`edit_note`,
+`create_note`), el agente falla con:
+
+```
+Parsing LLM output produced both a final answer and a parse-able action
+[...]
+Invalid or incomplete response
+```
+
+El LLM genera en el mismo turno un bloque `Action / Action Input` y un `Final Answer`,
+mezclando ambos cuando el razonamiento se vuelve multi-paso. El parser ReAct de
+LangChain no puede interpretar esa salida y devuelve el fallback
+`Invalid or incomplete response` como respuesta al usuario.
+
+El `handle_parsing_errors=True` del `AgentExecutor` atrapa el error pero no lo
+corrige: el modelo sigue cometiendo el mismo fallo en iteraciones sucesivas hasta
+alcanzar `max_iterations=5`.
+
+### Por qué ocurre
+
+ReAct exige que el LLM genere **exactamente uno** de los dos patrones por turno:
+- `Action: X\nAction Input: Y` (usar herramienta), o bien
+- `Final Answer: Z` (responder al usuario)
+
+Los modelos de ≤3B parámetros tienden a "atajan" el razonamiento incluyendo
+ambos en el mismo bloque, especialmente cuando el input de la herramienta
+necesita un JSON con múltiples campos (como `note_id` + `content`).
+
+Las búsquedas simples (`search_vault`) sí funcionan con modelos pequeños porque
+el input de la herramienta es un string corto y el agente suele necesitar solo
+un ciclo de razonamiento.
+
+### Modelos probados
+
+| Modelo | Backend | Búsqueda | Creación/edición | Notas |
+|---|---|---|---|---|
+| `llama3.2` (3B) | Ollama local | ✅ | ❌ | Falla al generar JSON multi-campo |
+| `llama3.2:1b` | Ollama local | ⚠️ | ❌ | Peor aún; a veces falla también búsqueda |
+| `gemma4:e2b-mlx` (2B) | Ollama local | ❌ | ❌ | 2B params; mismo fallo que llama3.2, probado |
+| `mistral` (7B) | Ollama local | ✅ | ⚠️ | Entra en bucle de búsquedas en ediciones complejas |
+| `gemma3:12b` (12B) | Ollama local | ✅ | ✅ | Recomendado; probado búsqueda + edición sin bucles |
+| `qwen3.6:35b-a3b-coding-nvfp4` | Ollama local | ✅ | ✅ | Modelos coding son más robustos con JSON |
+| `llama-3.2-90b-text-preview` | Groq API | ✅ | ✅ | 90B; sin problemas de formato |
+
+### Recomendación para el TFM
+
+- **Mínimo recomendado para Ollama**: `mistral` (7B) o cualquier modelo ≥7B
+  que sea instruction-tuned. Configurar con `OLLAMA_LLM_MODEL=mistral` en `.env`.
+- **Modelos pequeños (≤3B)**: válidos **solo para demo de búsqueda**. Documentar
+  explícitamente esta limitación en la memoria del TFM si se usan en evaluación.
+- **Groq**: cualquier modelo del tier gratuito de Groq (llama-3.1-8b-instant,
+  llama-3.2-90b) funciona correctamente para las tres operaciones.
+- La tabla de decisiones de `critical-task-planning.md` ya recoge el trade-off
+  ReAct vs. tool-calling: tool-calling nativo (si el modelo lo soporta) sería
+  más robusto, pero ReAct es más portable entre modelos.
+
+### Cómo evitarlo en el futuro
+
+- En los scripts de evaluación (Fase 8), usar un modelo ≥7B para las ejecuciones
+  de referencia; anotar el modelo exacto junto a cada resultado de evaluación.
+- Si se quiere conservar `llama3.2` para velocidad en demos, limitar el agente
+  a operaciones de solo lectura (`search_vault`) en esa configuración.
+
+---
+
 ## [2026-06-15] Deriva de firmas entre Fase 3 (puertos) y la spec de Fase 4
 
 **Fase**: fase-4-casos-de-uso.md

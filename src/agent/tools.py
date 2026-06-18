@@ -6,6 +6,7 @@ y devuelve un Tool de LangChain listo para usar en el agente.
 
 import json
 import logging
+import re
 
 from langchain.tools import Tool
 
@@ -15,6 +16,38 @@ from src.domain.models import ChunkStrategy
 from src.domain.ports import NoteNotFoundError, VaultWriteError, VectorStoreError
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_json_loads(s: str) -> dict:
+    """json.loads tolerante a saltos de línea literales dentro de strings.
+
+    Los LLMs generan frecuentemente JSON con \\n reales dentro de valores
+    de string en lugar de la secuencia de escape \\\\n, lo que rompe el
+    parser estándar.
+    """
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    # Reescribir carácter a carácter escapando \\n dentro de strings JSON
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    for ch in s:
+        if escaped:
+            out.append(ch)
+            escaped = False
+        elif ch == "\\":
+            out.append(ch)
+            escaped = True
+        elif ch == '"':
+            out.append(ch)
+            in_string = not in_string
+        elif ch == "\n" and in_string:
+            out.append("\\n")
+        else:
+            out.append(ch)
+    return json.loads("".join(out))
 
 
 def create_search_tool(
@@ -69,7 +102,7 @@ def create_note_tool(manage_use_case: ManageNotes) -> Tool:
 
     def _create(tool_input: str) -> str:
         try:
-            data = json.loads(tool_input)
+            data = _safe_json_loads(tool_input)
             title = data["title"]
             content = data["content"]
             tags = data.get("tags", [])
@@ -106,7 +139,7 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
 
     def _edit(tool_input: str) -> str:
         try:
-            data = json.loads(tool_input)
+            data = _safe_json_loads(tool_input)
             note_id = data["note_id"]
             content = data["content"]
         except (json.JSONDecodeError, KeyError):
@@ -126,7 +159,13 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
         func=_edit,
         description=(
             "Edita el contenido de una nota existente en el vault de Obsidian. "
+            "IMPORTANTE: note_id debe ser el identificador exacto que aparece como "
+            "'(nota: X)' en los resultados de search_vault, "
+            "por ejemplo '01-proyectos/tfm/resumen'. "
+            "Nunca uses el título en lenguaje natural como note_id. "
             "El input debe ser un JSON con campos: "
-            "note_id (str, ruta de la nota), content (str, nuevo contenido completo)."
+            "note_id (str, ruta exacta obtenida de search_vault), "
+            "content (str, nuevo contenido completo de la nota — "
+            "NO incluyas marcadores de búsqueda como '(nota: X, score: Y)')."
         ),
     )
