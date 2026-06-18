@@ -6,7 +6,6 @@ y devuelve un Tool de LangChain listo para usar en el agente.
 
 import json
 import logging
-import re
 
 from langchain.tools import Tool
 
