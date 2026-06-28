@@ -16,6 +16,7 @@ from src.domain.ports import (
     ChunkEmbedder,
     ConfigError,
     ConversationalLLM,
+    IEvaluationRepo,
     NoteLoader,
     NoteWriter,
     VectorStore,
@@ -227,6 +228,24 @@ def get_chunker_from_env() -> BaseChunker:
     """
     strategy = _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
     return get_chunker(strategy)
+
+
+def get_evaluation_repo(
+    dataset_path: str = "evaluation/dataset.json",
+    results_dir: str = "evaluation/results",
+) -> IEvaluationRepo:
+    """Devuelve el adaptador de repositorio de evaluación.
+
+    Args:
+        dataset_path: Ruta al fichero dataset.json de preguntas anotadas.
+        results_dir: Directorio donde se guardan los resultados JSON.
+
+    Returns:
+        EvaluationRepo configurado con las rutas indicadas.
+    """
+    from src.adapters.evaluation_repo import EvaluationRepo
+
+    return EvaluationRepo(dataset_path=dataset_path, results_dir=results_dir)
 
 
 def _parse_strategy(value: str) -> ChunkStrategy:
