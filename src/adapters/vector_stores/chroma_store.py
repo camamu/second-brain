@@ -256,3 +256,29 @@ class ChromaVectorStore(VectorStore):
             Suma de chunks en todas las colecciones del prefijo.
         """
         return sum(c.count() for c in self._existing_collections())
+
+    def clear(self) -> None:
+        """Elimina y recrea la colección de la estrategia por defecto.
+
+        Raises:
+            VectorStoreError: Si falla la operación de borrado en ChromaDB.
+        """
+        collection_name = self._collection_name(self._default_strategy)
+        try:
+            existing = list(self._client.list_collections())
+            if collection_name in existing:
+                self._client.delete_collection(collection_name)
+                logger.info("Colección '%s' eliminada", collection_name)
+            self._client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            logger.info("Colección '%s' recreada vacía", collection_name)
+        except Exception as exc:
+            logger.error(
+                "Error al limpiar colección '%s': %s",
+                collection_name,
+                exc,
+                exc_info=True,
+            )
+            raise VectorStoreError(str(exc)) from exc

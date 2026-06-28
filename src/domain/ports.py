@@ -303,6 +303,18 @@ class VectorStore(ABC):
         """
         ...
 
+    @abstractmethod
+    def clear(self) -> None:
+        """Elimina todos los chunks de la colección activa.
+
+        Útil para reindexar el vault con una estrategia diferente
+        durante la evaluación comparativa.
+
+        Raises:
+            VectorStoreError: Si falla la operación de borrado.
+        """
+        ...
+
 
 class ConversationalLLM(ABC):
     """Interface para generar respuestas con un LLM.

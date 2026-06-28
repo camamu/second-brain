@@ -315,6 +315,9 @@ class EvaluationResult:
         mrr_per_sample: MRR detallado por cada sample.
         total_samples: Numero total de samples evaluados.
         average_precision: Precision promedio por sample.
+        recall_at_k: Dict recall@K por cada K evaluado.
+            Fraccion de notas relevantes recuperadas en top-K.
+            Ej: {5: 0.72, 10: 0.85}
     """
 
     strategy: str
@@ -323,6 +326,7 @@ class EvaluationResult:
     mrr: float = 0.0
     mrr_per_sample: Dict[str, float] = field(default_factory=dict)
     average_precision: float = 0.0
+    recall_at_k: Dict[int, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.strategy:
@@ -351,7 +355,15 @@ class EvaluationResult:
         p_str = ", ".join(
             f"P@{k}={v:.3f}" for k, v in sorted(self.precision_at_k.items())
         )
-        return (
-            f"Strategy={self.strategy} | Samples={self.total_samples} | "
-            f"MRR={self.mrr:.3f} | {p_str}"
-        )
+        parts = [
+            f"Strategy={self.strategy}",
+            f"Samples={self.total_samples}",
+            f"MRR={self.mrr:.3f}",
+            p_str,
+        ]
+        if self.recall_at_k:
+            r_str = ", ".join(
+                f"R@{k}={v:.3f}" for k, v in sorted(self.recall_at_k.items())
+            )
+            parts.append(r_str)
+        return " | ".join(parts)
