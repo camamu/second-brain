@@ -103,7 +103,7 @@ class GroqLLMAdapter(ConversationalLLM):
     def __init__(
         self,
         api_key: str,
-        model: str = "llama-3.2-90b-text-preview",
+        model: str = "llama-3.3-70b-versatile",
     ) -> None:
         """Inicializa el adaptador LLM con la API key de Groq.
 

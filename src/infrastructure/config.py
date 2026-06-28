@@ -88,7 +88,7 @@ def get_llm() -> ConversationalLLM:
         from src.adapters.llm.groq_adapter import GroqLLMAdapter
 
         api_key = _require("GROQ_API_KEY")
-        model = os.getenv("GROQ_MODEL", "llama-3.2-90b-text-preview")
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         logger.info("LLM: GroqLLMAdapter (model=%s)", model)
         return GroqLLMAdapter(api_key=api_key, model=model)
 

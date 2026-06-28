@@ -5,7 +5,12 @@ Ejecutar con USE_LOCAL=false configurado en .env:
 """
 
 import logging
+import sys
 import time
+from pathlib import Path
+
+# Añade la raíz del proyecto al path para que 'src' sea importable
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 
