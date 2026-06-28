@@ -230,6 +230,15 @@ def get_chunker_from_env() -> BaseChunker:
     return get_chunker(strategy)
 
 
+def is_readonly() -> bool:
+    """Indica si el sistema está en modo solo lectura (sin escritura al vault).
+
+    Returns:
+        True si READONLY_MODE=true, False en caso contrario.
+    """
+    return _get_bool("READONLY_MODE", default=False)
+
+
 def get_evaluation_repo(
     dataset_path: str = "evaluation/dataset.json",
     results_dir: str = "evaluation/results",

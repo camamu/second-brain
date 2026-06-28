@@ -69,23 +69,29 @@ def create_agent(
     search_use_case: SearchNotes,
     manage_use_case: ManageNotes,
     strategy: ChunkStrategy = ChunkStrategy.FIXED_SIZE,
+    readonly: bool = False,
 ) -> AgentExecutor:
-    """Construye el agente ReAct con las tres herramientas del vault.
+    """Construye el agente ReAct con las herramientas del vault.
 
     Args:
         llm: Modelo de lenguaje de LangChain (OllamaLLM o ChatGroq).
         search_use_case: Caso de uso de búsqueda semántica.
         manage_use_case: Caso de uso de gestión de notas.
         strategy: Estrategia de chunking para search_vault.
+        readonly: Si True, solo incluye search_vault (sin create/edit).
 
     Returns:
         AgentExecutor listo para recibir preguntas del usuario.
     """
-    tools = [
-        create_search_tool(search_use_case, strategy),
-        create_note_tool(manage_use_case),
-        create_edit_tool(manage_use_case),
-    ]
+    search_tool = create_search_tool(search_use_case, strategy)
+    if readonly:
+        tools = [search_tool]
+    else:
+        tools = [
+            search_tool,
+            create_note_tool(manage_use_case),
+            create_edit_tool(manage_use_case),
+        ]
 
     memory = ConversationBufferWindowMemory(
         k=10,
@@ -105,8 +111,9 @@ def create_agent(
     )
 
     logger.info(
-        "Agente ReAct creado con %d herramientas, estrategia=%s",
+        "Agente ReAct creado: %d herramientas, estrategia=%s, readonly=%s",
         len(tools),
         strategy.value,
+        readonly,
     )
     return executor

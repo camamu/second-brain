@@ -46,7 +46,10 @@ class HuggingFaceEmbedderAdapter(ChunkEmbedder):
         from langchain_huggingface import HuggingFaceEmbeddings
 
         self._model_name = model_name
-        self._embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        self._embeddings = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={"trust_remote_code": True},
+        )
 
     def embed(self, text: str) -> List[float]:
         """Genera el vector de embedding de un texto.
