@@ -201,7 +201,12 @@ class ChromaVectorStore(VectorStore):
         raw_documents = results["documents"]
         raw_distances = results["distances"]
         raw_metadatas = results["metadatas"]
-        if not raw_ids or raw_documents is None or raw_distances is None or raw_metadatas is None:
+        if (
+            not raw_ids
+            or raw_documents is None
+            or raw_distances is None
+            or raw_metadatas is None
+        ):
             return []
 
         ids = raw_ids[0]
