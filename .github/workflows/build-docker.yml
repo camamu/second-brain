@@ -2,13 +2,15 @@ name: Build Docker Image
 
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["main", "develop"]
     paths:
       - "Dockerfile"
       - "src/**"
       - "app.py"
       - "requirements.txt"
       - "chainlit.md"
+  release:
+    types: [published]
 
 jobs:
   build:
