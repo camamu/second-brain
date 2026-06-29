@@ -1,0 +1,78 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    # Solo se ejecuta si el merge viene de develop
+    if: contains(github.event.head_commit.message, 'Merge') && contains(github.event.head_commit.message, 'develop')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # necesario para crear tags y releases
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # necesario para leer el historial de tags
+
+      - name: Get next version
+        id: version
+        run: |
+          # Obtiene el último tag semántico o empieza desde v0.0.0
+          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
+
+          if [ -z "$LAST_TAG" ]; then
+            NEXT="v0.1.0"
+          else
+            # Incrementa el minor version automáticamente
+            MAJOR=$(echo $LAST_TAG | cut -d. -f1 | tr -d 'v')
+            MINOR=$(echo $LAST_TAG | cut -d. -f2)
+            PATCH=$(echo $LAST_TAG | cut -d. -f3)
+            NEXT="v${MAJOR}.$((MINOR + 1)).0"
+          fi
+
+          echo "tag=$NEXT" >> $GITHUB_OUTPUT
+          echo "Next version: $NEXT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LAST_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
+
+          if [ -z "$LAST_TAG" ]; then
+            # Primera release — todos los commits
+            COMMITS=$(git log --pretty=format:"- %s (%h)" | head -20)
+          else
+            # Commits desde el último tag
+            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
+          fi
+
+          # Escribe el changelog en un fichero para pasarlo al siguiente step
+          {
+            echo "## Cambios en ${{ steps.version.outputs.tag }}"
+            echo ""
+            echo "$COMMITS"
+          } > CHANGELOG_RELEASE.md
+
+          cat CHANGELOG_RELEASE.md
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Release ${{ steps.version.outputs.tag }}"
+          body_path: CHANGELOG_RELEASE.md
+          draft: false
+          prerelease: false
