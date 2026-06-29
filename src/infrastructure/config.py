@@ -88,7 +88,7 @@ def get_llm() -> ConversationalLLM:
         from src.adapters.llm.groq_adapter import GroqLLMAdapter
 
         api_key = _require("GROQ_API_KEY")
-        model = os.getenv("GROQ_MODEL", "llama-3.2-90b-text-preview")
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         logger.info("LLM: GroqLLMAdapter (model=%s)", model)
         return GroqLLMAdapter(api_key=api_key, model=model)
 
@@ -228,6 +228,15 @@ def get_chunker_from_env() -> BaseChunker:
     """
     strategy = _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
     return get_chunker(strategy)
+
+
+def is_readonly() -> bool:
+    """Indica si el sistema está en modo solo lectura (sin escritura al vault).
+
+    Returns:
+        True si READONLY_MODE=true, False en caso contrario.
+    """
+    return _get_bool("READONLY_MODE", default=False)
 
 
 def get_evaluation_repo(

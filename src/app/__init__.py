@@ -16,6 +16,7 @@ from src.infrastructure.config import (
     get_note_loader,
     get_note_writer,
     get_vector_store,
+    is_readonly,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +68,7 @@ async def on_chat_start() -> None:
             search_use_case=search_uc,
             manage_use_case=manage_uc,
             strategy=strategy,
+            readonly=is_readonly(),
         )
         cl.user_session.set("agent", agent)
         await cl.Message(
