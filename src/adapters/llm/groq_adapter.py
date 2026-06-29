@@ -112,9 +112,10 @@ class GroqLLMAdapter(ConversationalLLM):
             model: Nombre del modelo a usar en Groq.
         """
         from langchain_groq import ChatGroq
+        from pydantic import SecretStr
 
         self._model = model
-        self._llm = ChatGroq(api_key=api_key, model=model)
+        self._llm = ChatGroq(api_key=SecretStr(api_key), model=model)
 
     def as_langchain(self):
         """Devuelve el objeto LangChain subyacente para uso en el agente ReAct."""

@@ -52,7 +52,7 @@ class ChromaVectorStore(VectorStore):
         embedder: ChunkEmbedder,
         default_strategy: ChunkStrategy,
         collection_prefix: str = "obsidian_rag",
-        client: Optional[chromadb.Client] = None,
+        client: Optional[chromadb.ClientAPI] = None,
     ) -> None:
         """Inicializa el store con el embedder y la estrategia por defecto.
 
@@ -129,9 +129,9 @@ class ChromaVectorStore(VectorStore):
 
                 collection.upsert(
                     ids=ids,
-                    embeddings=embeddings,
+                    embeddings=embeddings,  # type: ignore[arg-type]
                     documents=documents,
-                    metadatas=metadatas,
+                    metadatas=metadatas,  # type: ignore[arg-type]
                 )
                 logger.info(
                     "Upserted %d chunks en colección '%s'",
@@ -190,17 +190,24 @@ class ChromaVectorStore(VectorStore):
 
             query_vector = self._embedder.embed(query.query)
             results = collection.query(
-                query_embeddings=[query_vector],
+                query_embeddings=[query_vector],  # type: ignore[arg-type]
                 n_results=min(query.top_k, collection.count()),
             )
         except Exception as exc:
             logger.error("Error en search: %s", exc, exc_info=True)
             raise VectorStoreError(str(exc)) from exc
 
-        ids = results["ids"][0]
-        documents = results["documents"][0]
-        distances = results["distances"][0]
-        metadatas = results["metadatas"][0]
+        raw_ids = results["ids"]
+        raw_documents = results["documents"]
+        raw_distances = results["distances"]
+        raw_metadatas = results["metadatas"]
+        if not raw_ids or raw_documents is None or raw_distances is None or raw_metadatas is None:
+            return []
+
+        ids = raw_ids[0]
+        documents = raw_documents[0]
+        distances = raw_distances[0]
+        metadatas = raw_metadatas[0]
 
         # Acumular tuplas (chunk_id, note_id, content, score) antes de asignar rank
         candidates = []
@@ -208,7 +215,7 @@ class ChromaVectorStore(VectorStore):
             score = max(0.0, min(1.0, 1.0 - distance))
             if score < query.min_score:
                 continue
-            candidates.append((chunk_id, meta.get("note_id", ""), doc, score))
+            candidates.append((chunk_id, str(meta.get("note_id", "")), doc, score))
 
         candidates.sort(key=lambda t: t[3], reverse=True)
         return [

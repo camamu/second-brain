@@ -21,9 +21,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements-dev.txt
-          pip install mypy>=1.10.0
+        run: pip install -r requirements-dev.txt
 
       - name: Run mypy
-        run: mypy src --ignore-missing-imports
+        run: mypy src

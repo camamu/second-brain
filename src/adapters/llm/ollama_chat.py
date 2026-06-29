@@ -43,4 +43,4 @@ class OllamaChat:
         self._messages.append(HumanMessage(content=user_message))
         response = self.chat.invoke(self._messages)
         self._messages.append(response)
-        return response.content
+        return str(response.content)
