@@ -17,6 +17,7 @@ pytest tests/integration/                    # integration tests (ChromaDB in-me
 pytest tests/unit/test_models.py -v         # run a single test file
 ruff check src/                              # lint
 ruff format src/                             # format
+mypy src                                     # type check (configurado en pyproject.toml)
 ```
 
 No Makefile exists. `pyproject.toml` exists with ruff and pytest configuration.
