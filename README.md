@@ -2,7 +2,7 @@
 title: Obsidian RAG Agent
 emoji: 🧠
 colorFrom: purple
-colorTo: teal
+colorTo: blue
 sdk: docker
 app_port: 8000
 ---
