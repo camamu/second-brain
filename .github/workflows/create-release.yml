@@ -1,14 +1,15 @@
 name: Create Release
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - main
 
 jobs:
   release:
-    # Solo se ejecuta si el merge viene de develop
-    if: contains(github.event.head_commit.message, 'Merge') && contains(github.event.head_commit.message, 'develop')
+    # Solo cuando la PR se mergea a main (no cuando se cierra sin merge)
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     permissions:
@@ -20,41 +21,66 @@ jobs:
         with:
           fetch-depth: 0   # necesario para leer el historial de tags
 
+      - name: Determine release type from PR labels
+        id: release_type
+        run: |
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+          echo "Labels de la PR: $LABELS"
+
+          if echo "$LABELS" | grep -qi '"release:major"'; then
+            echo "type=major" >> $GITHUB_OUTPUT
+            echo "Tipo: major"
+          elif echo "$LABELS" | grep -qi '"release:hotfix"'; then
+            echo "type=hotfix" >> $GITHUB_OUTPUT
+            echo "Tipo: hotfix (patch)"
+          else
+            echo "type=minor" >> $GITHUB_OUTPUT
+            echo "Tipo: minor (por defecto)"
+          fi
+
       - name: Get next version
         id: version
         run: |
-          # Obtiene el último tag semántico o empieza desde v0.0.0
           LAST_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
+          TYPE="${{ steps.release_type.outputs.type }}"
 
           if [ -z "$LAST_TAG" ]; then
-            NEXT="v0.1.0"
+            case "$TYPE" in
+              major)  NEXT="v1.0.0" ;;
+              hotfix) NEXT="v0.0.1" ;;
+              *)      NEXT="v0.1.0" ;;
+            esac
           else
-            # Incrementa el minor version automáticamente
             MAJOR=$(echo $LAST_TAG | cut -d. -f1 | tr -d 'v')
             MINOR=$(echo $LAST_TAG | cut -d. -f2)
             PATCH=$(echo $LAST_TAG | cut -d. -f3)
-            NEXT="v${MAJOR}.$((MINOR + 1)).0"
+            case "$TYPE" in
+              major)  NEXT="v$((MAJOR + 1)).0.0" ;;
+              hotfix) NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+              *)      NEXT="v${MAJOR}.$((MINOR + 1)).0" ;;
+            esac
           fi
 
           echo "tag=$NEXT" >> $GITHUB_OUTPUT
-          echo "Next version: $NEXT"
+          echo "Próxima versión: $NEXT (tipo: $TYPE)"
 
       - name: Generate changelog
         id: changelog
         run: |
           LAST_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
 
           if [ -z "$LAST_TAG" ]; then
-            # Primera release — todos los commits
             COMMITS=$(git log --pretty=format:"- %s (%h)" | head -20)
           else
-            # Commits desde el último tag
             COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
           fi
 
-          # Escribe el changelog en un fichero para pasarlo al siguiente step
           {
             echo "## Cambios en ${{ steps.version.outputs.tag }}"
+            echo ""
+            echo "**PR:** #${PR_NUMBER} — ${PR_TITLE}"
             echo ""
             echo "$COMMITS"
           } > CHANGELOG_RELEASE.md
