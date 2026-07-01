@@ -107,13 +107,15 @@ def create_agent(
         memory=memory,
         verbose=True,
         handle_parsing_errors=(
-            "Formato incorrecto. Usa EXACTAMENTE este formato:\n"
+            "Formato incorrecto. Cuando necesitas usar una herramienta:\n"
             "Thought: <razonamiento>\n"
             "Action: <nombre_herramienta>\n"
-            "Action Input: <texto_de_entrada>\n"
+            "Action Input: <texto_de_entrada>\n\n"
+            "Cuando ya tienes la respuesta final:\n"
+            "Thought: Tengo la respuesta final.\n"
+            "Final Answer: <respuesta para el usuario>\n"
         ),
-        max_iterations=5,
-        early_stopping_method="generate",
+        max_iterations=10,
     )
 
     logger.info(
