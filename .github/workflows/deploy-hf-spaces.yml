@@ -3,6 +3,7 @@ name: Deploy to Hugging Face Spaces
 on:
   release:
     types: [published]   # solo se activa cuando se publica una release real (no draft)
+  workflow_call:         # permite ser llamado desde create-release.yml
 
 jobs:
   deploy:

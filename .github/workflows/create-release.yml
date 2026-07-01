@@ -76,3 +76,8 @@ jobs:
           body_path: CHANGELOG_RELEASE.md
           draft: false
           prerelease: false
+
+  deploy:
+    needs: release
+    uses: ./.github/workflows/deploy-hf-spaces.yml
+    secrets: inherit
