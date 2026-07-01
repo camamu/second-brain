@@ -15,6 +15,10 @@ jobs:
     permissions:
       contents: write   # necesario para crear tags y releases
 
+    outputs:
+      release_type: ${{ steps.release_type.outputs.type }}
+      version_tag: ${{ steps.version.outputs.tag }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -109,3 +113,43 @@ jobs:
     needs: release
     uses: ./.github/workflows/deploy-hf-spaces.yml
     secrets: inherit
+
+  sync-develop:
+    needs: release
+    if: needs.release.outputs.release_type == 'hotfix'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create sync branch and open PR against develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.release.outputs.version_tag }}"
+          VERSION_NUM="${VERSION#v}"
+          SYNC_BRANCH="internal/sync-develop-with-main-${VERSION_NUM}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$SYNC_BRANCH" origin/main
+          git push origin "$SYNC_BRANCH"
+
+          printf "## Sync develop ← main (hotfix %s)\n\n" "$VERSION" > /tmp/pr-body.md
+          printf "Esta PR integra en \`develop\` los cambios del hotfix %s mergeado en \`main\`.\n\n" "$VERSION" >> /tmp/pr-body.md
+          printf "**Origen:** rama de hotfix mergeada a \`main\` y publicada como release %s.\n" "$VERSION" >> /tmp/pr-body.md
+          printf "**Acción requerida:** resolver conflictos si los hay y mergear para mantener \`develop\` al día con \`main\`.\n" >> /tmp/pr-body.md
+
+          gh pr create \
+            --base develop \
+            --head "$SYNC_BRANCH" \
+            --title "chore: sync develop with main after hotfix ${VERSION}" \
+            --body-file /tmp/pr-body.md
