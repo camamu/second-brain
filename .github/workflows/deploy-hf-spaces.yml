@@ -1,0 +1,49 @@
+name: Deploy to Hugging Face Spaces
+
+on:
+  release:
+    types: [published]   # solo se activa cuando se publica una release real (no draft)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install HuggingFace CLI
+        run: pip install huggingface_hub
+
+      - name: Configure git for HF Spaces
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Push to Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME }}
+        run: |
+          # Añade el remote de HF Spaces si no existe
+          git remote add space \
+            https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME} \
+            || git remote set-url space \
+            https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME}
+
+          # Push forzado para sincronizar con el estado actual de main
+          git push space main:main --force
+
+      - name: Notify deployment success
+        run: |
+          echo "✅ Deployed release ${{ github.event.release.tag_name }} to HF Spaces"
+          echo "🔗 https://huggingface.co/spaces/${{ secrets.HF_USERNAME }}/${{ secrets.HF_SPACE_NAME }}"

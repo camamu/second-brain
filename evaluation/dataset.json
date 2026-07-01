@@ -1,0 +1,259 @@
+{
+  "metadata": {
+    "vault_name": "vault-demo",
+    "created_at": "2026-06-18",
+    "total_samples": 25,
+    "annotator": "autor del TFM",
+    "k_eval": 5,
+    "description": "Dataset de evaluación comparativa para estrategias de chunking: fixed-size, markdown-header y backlink-aware. Las preguntas están anotadas con los IDs reales del vault-demo."
+  },
+  "samples": [
+    {
+      "id": "q01",
+      "query": "¿Qué es la arquitectura hexagonal y cuáles son sus capas principales?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/arquitectura-hexagonal",
+        "02-areas/arquitectura/puertos-adaptadores"
+      ],
+      "difficulty": "easy",
+      "notes": "Definición directa en arquitectura-hexagonal; puertos-adaptadores completa la explicación de capas"
+    },
+    {
+      "id": "q02",
+      "query": "¿Cuál es la diferencia entre un puerto y un adaptador?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/puertos-adaptadores"
+      ],
+      "difficulty": "easy",
+      "notes": "La nota puertos-adaptadores define ambos conceptos con ejemplos del propio proyecto"
+    },
+    {
+      "id": "q03",
+      "query": "¿Qué es RAG (Retrieval-Augmented Generation)?",
+      "relevant_note_ids": [
+        "02-areas/rag/rag-fundamentos"
+      ],
+      "difficulty": "easy",
+      "notes": "Definición, flujo y componentes clave en una sola nota"
+    },
+    {
+      "id": "q04",
+      "query": "¿Qué es ChromaDB y para qué se usa en este proyecto?",
+      "relevant_note_ids": [
+        "02-areas/rag/chromadb"
+      ],
+      "difficulty": "easy",
+      "notes": "Nota dedicada a ChromaDB: colecciones, persistencia, búsqueda por similitud"
+    },
+    {
+      "id": "q05",
+      "query": "¿Qué es Ollama y cómo permite ejecutar LLMs localmente?",
+      "relevant_note_ids": [
+        "03-recursos/llms-locales-ollama"
+      ],
+      "difficulty": "easy",
+      "notes": "Nota específica sobre Ollama: modelos usados, integración con LangChain, ventajas"
+    },
+    {
+      "id": "q06",
+      "query": "¿Qué son los embeddings y cómo se mide la similitud entre ellos?",
+      "relevant_note_ids": [
+        "02-areas/rag/embeddings-vectores"
+      ],
+      "difficulty": "easy",
+      "notes": "Nota sobre embeddings: similitud coseno, modelos usados, espacio vectorial"
+    },
+    {
+      "id": "q07",
+      "query": "¿Qué es LangChain y qué abstracciones ofrece para trabajar con LLMs?",
+      "relevant_note_ids": [
+        "02-areas/rag/langchain-agentes"
+      ],
+      "difficulty": "easy",
+      "notes": "Nota sobre LangChain: chains, agentes, herramientas, memoria de conversación"
+    },
+    {
+      "id": "q08",
+      "query": "¿Qué problema resuelve el patrón Transactional Outbox?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/transactional-outbox"
+      ],
+      "difficulty": "easy",
+      "notes": "Nota dedicada: el problema de atomicidad entre escritura y publicación de eventos"
+    },
+    {
+      "id": "q09",
+      "query": "¿Cuál es la diferencia entre una chain y un agente en LangChain?",
+      "relevant_note_ids": [
+        "02-areas/rag/langchain-agentes"
+      ],
+      "difficulty": "medium",
+      "notes": "La nota distingue explícitamente chain (flujo fijo) vs agente (flujo dinámico con herramientas)"
+    },
+    {
+      "id": "q10",
+      "query": "¿Qué es el patrón Saga y cómo se gestionan los fallos con transacciones compensatorias?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/saga-pattern"
+      ],
+      "difficulty": "medium",
+      "notes": "Requiere leer toda la nota: transacciones locales, compensaciones, correlation IDs"
+    },
+    {
+      "id": "q11",
+      "query": "¿Cuál es la diferencia entre un monolito modular y los microservicios?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/monolito-modular",
+        "02-areas/arquitectura/microservicios"
+      ],
+      "difficulty": "medium",
+      "notes": "Requiere conectar ambas notas; cada una explica un extremo del espectro"
+    },
+    {
+      "id": "q12",
+      "query": "¿Cómo facilita la arquitectura hexagonal el testing unitario de los casos de uso?",
+      "relevant_note_ids": [
+        "02-areas/python/testing-python",
+        "02-areas/arquitectura/arquitectura-hexagonal"
+      ],
+      "difficulty": "medium",
+      "notes": "testing-python explica el porqué con ejemplos; arquitectura-hexagonal da el contexto"
+    },
+    {
+      "id": "q13",
+      "query": "¿Por qué usa el proyecto una colección ChromaDB distinta por estrategia de chunking?",
+      "relevant_note_ids": [
+        "02-areas/rag/chromadb",
+        "02-areas/rag/chunking-estrategias"
+      ],
+      "difficulty": "medium",
+      "notes": "chromadb explica la decisión de diseño; chunking-estrategias da el contexto de las tres estrategias"
+    },
+    {
+      "id": "q14",
+      "query": "¿Qué modelos de embeddings se usan en el proyecto y en qué entornos?",
+      "relevant_note_ids": [
+        "02-areas/rag/embeddings-vectores",
+        "03-recursos/llms-locales-ollama",
+        "03-recursos/groq-despliegue"
+      ],
+      "difficulty": "medium",
+      "notes": "La respuesta completa requiere las tres notas: qué son, cómo se usan en local y en producción"
+    },
+    {
+      "id": "q15",
+      "query": "¿Cuál es la diferencia entre orquestación y coreografía en el patrón Saga?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/saga-orquestacion-vs-coreografia",
+        "02-areas/arquitectura/saga-pattern"
+      ],
+      "difficulty": "medium",
+      "notes": "saga-orquestacion es la nota principal; saga-pattern da el contexto necesario"
+    },
+    {
+      "id": "q16",
+      "query": "¿Cómo afecta la estrategia de chunking a la calidad del retrieval semántico?",
+      "relevant_note_ids": [
+        "02-areas/rag/chunking-estrategias",
+        "02-areas/rag/rag-fundamentos"
+      ],
+      "difficulty": "medium",
+      "notes": "chunking-estrategias explica los trade-offs; rag-fundamentos contextualiza el retrieval"
+    },
+    {
+      "id": "q17",
+      "query": "¿Cuándo tiene sentido extraer un módulo de un monolito modular como microservicio independiente?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/microservicios",
+        "02-areas/arquitectura/monolito-modular"
+      ],
+      "difficulty": "medium",
+      "notes": "microservicios lista los criterios; monolito-modular explica el punto de partida"
+    },
+    {
+      "id": "q18",
+      "query": "¿Qué es el patrón ReAct y cómo lo aplica el agente de este proyecto?",
+      "relevant_note_ids": [
+        "02-areas/rag/langchain-agentes"
+      ],
+      "difficulty": "medium",
+      "notes": "langchain-agentes describe ReAct con el ejemplo concreto del agente del TFM"
+    },
+    {
+      "id": "q19",
+      "query": "¿Cómo mejora el BacklinkAwareChunker la recuperación de información respecto al chunking por tamaño fijo?",
+      "relevant_note_ids": [
+        "02-areas/rag/chunking-estrategias",
+        "02-areas/rag/rag-fundamentos"
+      ],
+      "difficulty": "hard",
+      "notes": "La comparación entre estrategias está en chunking-estrategias; el impacto en retrieval en rag-fundamentos. El BacklinkAwareChunker debería recuperar esta nota mejor al preservar los wikilinks"
+    },
+    {
+      "id": "q20",
+      "query": "¿Cómo se relaciona el patrón Saga con la consistencia eventual en sistemas de microservicios?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/saga-pattern",
+        "02-areas/arquitectura/microservicios",
+        "02-areas/arquitectura/comunicacion-modulos"
+      ],
+      "difficulty": "hard",
+      "notes": "Requiere conectar tres notas enlazadas: saga-pattern menciona consistencia eventual, microservicios la necesita, comunicacion-modulos explica el mecanismo asíncrono subyacente"
+    },
+    {
+      "id": "q21",
+      "query": "¿Cómo garantiza el Transactional Outbox la publicación fiable de eventos en un sistema con Sagas?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/transactional-outbox",
+        "02-areas/arquitectura/saga-pattern",
+        "02-areas/arquitectura/comunicacion-modulos"
+      ],
+      "difficulty": "hard",
+      "notes": "Tres notas enlazadas: transactional-outbox es la principal, saga-pattern explica la necesidad, comunicacion-modulos el problema que resuelve"
+    },
+    {
+      "id": "q22",
+      "query": "¿Cómo permite la arquitectura hexagonal cambiar de Ollama a Groq sin modificar la lógica de negocio?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/arquitectura-hexagonal",
+        "02-areas/arquitectura/puertos-adaptadores",
+        "03-recursos/groq-despliegue",
+        "03-recursos/llms-locales-ollama"
+      ],
+      "difficulty": "hard",
+      "notes": "Requiere conectar cuatro notas: la arquitectura que lo permite, el mecanismo concreto, y los dos entornos (local y producción)"
+    },
+    {
+      "id": "q23",
+      "query": "¿Qué ocurre si se cambia el modelo de embeddings sin reindexar el vault?",
+      "relevant_note_ids": [
+        "02-areas/rag/embeddings-vectores",
+        "00-inbox/idea-cache-embeddings"
+      ],
+      "difficulty": "hard",
+      "notes": "embeddings-vectores advierte explícitamente sobre la incompatibilidad de vectores; idea-cache-embeddings propone una mejora relacionada. El BacklinkAwareChunker debería conectar ambas al preservar los backlinks"
+    },
+    {
+      "id": "q24",
+      "query": "¿Cómo se comunican los módulos de forma asíncrona y qué problemas introduce esa comunicación?",
+      "relevant_note_ids": [
+        "02-areas/arquitectura/comunicacion-modulos",
+        "02-areas/arquitectura/transactional-outbox",
+        "02-areas/arquitectura/saga-pattern"
+      ],
+      "difficulty": "hard",
+      "notes": "comunicacion-modulos introduce el problema; transactional-outbox y saga-pattern son las soluciones. Las tres están enlazadas mediante wikilinks — caso ideal para backlink-aware"
+    },
+    {
+      "id": "q25",
+      "query": "¿En qué se diferencia el entorno local de desarrollo del entorno de producción pública del proyecto?",
+      "relevant_note_ids": [
+        "03-recursos/groq-despliegue",
+        "03-recursos/llms-locales-ollama",
+        "02-areas/arquitectura/arquitectura-hexagonal"
+      ],
+      "difficulty": "hard",
+      "notes": "groq-despliegue tiene la tabla comparativa; llms-locales-ollama explica el lado local; arquitectura-hexagonal explica por qué el cambio es trivial"
+    }
+  ]
+}

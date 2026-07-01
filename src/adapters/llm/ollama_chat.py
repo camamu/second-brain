@@ -1,7 +1,7 @@
 """Class to test LangChain with Ollama."""
 
-from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 
 SYSTEM_PROMPT = "You are a helpful assistant."
 
@@ -43,4 +43,4 @@ class OllamaChat:
         self._messages.append(HumanMessage(content=user_message))
         response = self.chat.invoke(self._messages)
         self._messages.append(response)
-        return response.content
+        return str(response.content)
