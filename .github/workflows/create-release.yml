@@ -21,18 +21,20 @@ jobs:
         with:
           fetch-depth: 0   # necesario para leer el historial de tags
 
-      - name: Determine release type from PR labels
+      - name: Determine release type from branch name and PR labels
         id: release_type
         run: |
+          BRANCH='${{ github.event.pull_request.head.ref }}'
           LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+          echo "Rama origen: $BRANCH"
           echo "Labels de la PR: $LABELS"
 
-          if echo "$LABELS" | grep -qi '"release:major"'; then
+          if [[ "$BRANCH" == hotfix/* ]]; then
+            echo "type=hotfix" >> $GITHUB_OUTPUT
+            echo "Tipo: hotfix (patch) — detectado por nombre de rama"
+          elif echo "$LABELS" | grep -qi '"release:major"'; then
             echo "type=major" >> $GITHUB_OUTPUT
             echo "Tipo: major"
-          elif echo "$LABELS" | grep -qi '"release:hotfix"'; then
-            echo "type=hotfix" >> $GITHUB_OUTPUT
-            echo "Tipo: hotfix (patch)"
           else
             echo "type=minor" >> $GITHUB_OUTPUT
             echo "Tipo: minor (por defecto)"
