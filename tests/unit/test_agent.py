@@ -44,3 +44,88 @@ class TestCreateAgent:
 
         tool_names = [t.name for t in executor.tools]
         assert tool_names == ["search_vault", "create_note", "edit_note"]
+
+    def test_create_agent_uses_force_stopping_method(self):
+        executor = create_agent(
+            llm=_make_fake_llm(),
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        assert executor.early_stopping_method == "force"
+
+    def test_create_agent_parsing_error_message_includes_final_answer(self):
+        executor = create_agent(
+            llm=_make_fake_llm(),
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        assert isinstance(executor.handle_parsing_errors, str)
+        assert "Final Answer" in executor.handle_parsing_errors
+
+
+class TestAgentExecutorBehavior:
+    """Tests de comportamiento que ejecutan el AgentExecutor con FakeListLLM."""
+
+    def test_invoke_does_not_raise_when_llm_uses_action_none(self):
+        """Bug de producción: LLM devuelve 'Action: None' en bucle.
+
+        Con early_stopping_method='generate' esto terminaba en ValueError.
+        Con 'force' el executor devuelve output sin explotar.
+        """
+        llm = FakeListLLM(
+            responses=["Thought: tengo info.\nAction: None\nAction Input: None"]
+        )
+
+        executor = create_agent(
+            llm=llm,
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        result = executor.invoke({"input": "¿qué es la arquitectura hexagonal?"})
+
+        assert "output" in result
+
+    def test_invoke_does_not_raise_on_max_iterations_exceeded(self):
+        """El agente que siempre llama una herramienta agota max_iterations=5
+        y debe retornar graciosamente en lugar de lanzar ValueError.
+        """
+        search_mock = MagicMock(spec=SearchNotes)
+        search_mock.execute_text.return_value = []
+        llm = FakeListLLM(
+            responses=[
+                "Thought: Necesito buscar.\nAction: search_vault\nAction Input: test"
+            ]
+        )
+
+        executor = create_agent(
+            llm=llm,
+            search_use_case=search_mock,
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        result = executor.invoke({"input": "¿qué es RAG?"})
+
+        assert "output" in result
+
+    def test_invoke_recovers_from_parsing_error_with_final_answer(self):
+        """Tras un error de formato, el LLM recibe el mensaje de guía actualizado
+        (que ahora incluye 'Final Answer:') y puede completar en el siguiente turno.
+        """
+        responses = [
+            "solo texto sin formato correcto",
+            "Thought: Tengo la respuesta.\nFinal Answer: respuesta correcta",
+        ]
+        llm = FakeListLLM(responses=responses)
+
+        executor = create_agent(
+            llm=llm,
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        result = executor.invoke({"input": "test"})
+
+        assert result["output"] == "respuesta correcta"

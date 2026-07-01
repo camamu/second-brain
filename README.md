@@ -16,7 +16,7 @@ El sistema indexa notas Markdown con tres estrategias de chunking distintas y pe
 ## Tecnologías
 
 - **LangChain** — orquestación del agente ReAct
-- **Groq** (`llama-3.2-90b-text-preview`) — LLM de generación
+- **Groq** (`llama-3.3-70b-versatile`) — LLM de generación
 - **HuggingFace Embeddings** (`nomic-ai/nomic-embed-text-v1`) — embeddings locales
 - **ChromaDB** — vector store con colecciones por estrategia
 - **Chainlit** — interfaz de chat web
