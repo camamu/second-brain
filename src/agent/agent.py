@@ -32,6 +32,9 @@ Reglas:
   Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
+- Si ya tienes la respuesta y no necesitas otra herramienta, NO escribas la
+  línea "Action:". Ve directo a "Thought: Tengo la respuesta final." seguido
+  de "Final Answer:".
 
 Herramientas disponibles:
 {tools}

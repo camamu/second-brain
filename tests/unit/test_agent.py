@@ -110,6 +110,34 @@ class TestAgentExecutorBehavior:
 
         assert "output" in result
 
+    def test_invoke_recovers_from_mixed_action_and_final_answer(self):
+        """Bug de producción: el LLM incluye un 'Action:'/'Action Input:'
+        parseable Y un 'Final Answer:' en la misma respuesta (típico cuando
+        ya tiene la información pero sigue redactando tras la observación).
+        LangChain lanza OutputParserException ("produced both a final
+        answer and a parse-able action"); el agente debe recuperarse en el
+        siguiente turno usando la guía de handle_parsing_errors.
+        """
+        responses = [
+            "Thought: ya tengo la información pero seré explícito.\n"
+            "Action: search_vault\n"
+            "Action Input: no hace falta\n"
+            "Thought: Tengo la respuesta final.\n"
+            "Final Answer: respuesta ignorada por formato mixto",
+            "Thought: Tengo la respuesta final.\nFinal Answer: respuesta correcta",
+        ]
+        llm = FakeListLLM(responses=responses)
+
+        executor = create_agent(
+            llm=llm,
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        result = executor.invoke({"input": "¿qué es la arquitectura hexagonal?"})
+
+        assert result["output"] == "respuesta correcta"
+
     def test_invoke_recovers_from_parsing_error_with_final_answer(self):
         """Tras un error de formato, el LLM recibe el mensaje de guía actualizado
         (que ahora incluye 'Final Answer:') y puede completar en el siguiente turno.
