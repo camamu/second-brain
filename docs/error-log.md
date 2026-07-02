@@ -447,3 +447,47 @@ adaptador, script, comando o variable de entorno nuevos, actualizar
 cerrada una fase, comparar explícitamente `CLAUDE.md` contra
 `find src -name "*.py" ! -name "__init__.py"`, `.env.example` y el número
 de tests (`pytest tests/unit/ -q`) para detectar drift antes de mergear.
+
+---
+
+## [2026-07-02] "Lint limpio" verificado solo a medias (ruff check sin ruff format)
+
+**Fase**: fase-6-chainlit.md (hotfix del agente)
+**Categoría**: testing
+
+### Qué se hizo mal
+
+Tras aplicar los fixes del bucle de `search_vault`, se afirmó que "ruff y
+mypy están limpios" habiendo ejecutado solo `ruff check src/ tests/`. Nunca
+se corrió `ruff format --check`. El commit se subió a la rama remota con
+`tests/unit/test_agent.py` sin formatear (una línea que ruff format habría
+partido en varias). El usuario lo detectó por el CI (`Would reformat:
+tests/unit/test_agent.py`), no el agente.
+
+### Por qué era un error
+
+`ruff check` (linter) y `ruff format` (formateador) son herramientas
+distintas que comprueban cosas distintas: una detecta errores/convenciones
+de código, la otra el formato exacto (line-wrapping, comillas, etc.). Pasar
+una no garantiza pasar la otra. El propio `CLAUDE.md` ya documentaba en la
+entrada "Lint after merges" que hay que correr ambas, pero esa lección
+estaba redactada solo para el caso de resolución de conflictos de merge, no
+como regla general antes de cualquier commit — por eso no se activó aquí.
+
+### Cómo se corrigió
+
+```bash
+ruff format src/ tests/   # reformatea
+ruff check src/ tests/    # lint
+pytest tests/unit/ -q     # confirma que el reformateo no rompe nada
+```
+
+Se creó un commit de estilo (`ef10b74`) separado del fix funcional y se
+volvió a subir.
+
+### Cómo evitarlo en el futuro
+
+Antes de dar por cerrado cualquier cambio de código (no solo tras merges),
+correr siempre `ruff format <paths> && ruff check <paths>` — nunca uno sin
+el otro — igual que ya hace `scripts/format.sh`. Preferir invocar ese script
+directamente en vez de recordar los dos comandos por separado.
