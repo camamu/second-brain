@@ -110,6 +110,43 @@ class TestAgentExecutorBehavior:
 
         assert "output" in result
 
+    def test_invoke_search_vault_receives_clean_query_despite_json_wrapped_input(
+        self,
+    ):
+        """Bug de producción (HF Spaces): el LLM envía Action Input como
+        JSON ('{"input": "arquitectura hexagonal"}') en lugar de texto
+        plano, lo que hacía que search_vault buscara con el JSON crudo,
+        obteniendo siempre el mismo resultado genérico y llevando al
+        agente a repetir search_vault → ChatGroq → search_vault sin llegar
+        a Final Answer, agotando el rate limit de Groq. El desenvolvimiento
+        de JSON en la tool debe evitar que la query llegue sucia al caso de
+        uso de búsqueda, incluso si el LLM sigue insistiendo con el mismo
+        formato incorrecto en cada iteración.
+        """
+        search_mock = MagicMock(spec=SearchNotes)
+        search_mock.execute_text.return_value = []
+        llm = FakeListLLM(
+            responses=[
+                "Thought: necesito buscar.\n"
+                "Action: search_vault\n"
+                'Action Input: {"input": "arquitectura hexagonal"}'
+            ]
+        )
+
+        executor = create_agent(
+            llm=llm,
+            search_use_case=search_mock,
+            manage_use_case=MagicMock(spec=ManageNotes),
+        )
+
+        result = executor.invoke(
+            {"input": "¿Qué es la arquitectura hexagonal?"}
+        )
+
+        assert "output" in result
+        for call in search_mock.execute_text.call_args_list:
+            assert call.args[0] == "arquitectura hexagonal"
+
     def test_invoke_recovers_from_mixed_action_and_final_answer(self):
         """Bug de producción: el LLM incluye un 'Action:'/'Action Input:'
         parseable Y un 'Final Answer:' en la misma respuesta (típico cuando

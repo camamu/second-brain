@@ -54,6 +54,23 @@ class TestSearchTool:
         assert "Contenido del chunk 1" in result
         assert "score:" in result
 
+    def test_search_tool_unwraps_json_wrapped_query(self):
+        """Bug de producción (HF Spaces): Groq/Llama envía Action Input como
+        JSON ('{"input": "arquitectura hexagonal"}') en lugar de texto
+        plano. Sin desenvolver, ese JSON crudo se usaba como query,
+        produciendo siempre el mismo resultado genérico y llevando al
+        agente a repetir la búsqueda en bucle hasta agotar el rate limit.
+        """
+        search_uc = MagicMock(spec=SearchNotes)
+        search_uc.execute_text.return_value = []
+        tool = create_search_tool(search_uc, ChunkStrategy.FIXED_SIZE)
+
+        tool.func('{"input": "arquitectura hexagonal"}')
+
+        search_uc.execute_text.assert_called_once_with(
+            "arquitectura hexagonal", strategy=ChunkStrategy.FIXED_SIZE
+        )
+
     def test_search_tool_returns_friendly_message_on_error(self):
         search_uc = MagicMock(spec=SearchNotes)
         search_uc.execute_text.side_effect = VectorStoreError("conexión fallida")
