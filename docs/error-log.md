@@ -274,3 +274,47 @@ Las specs de fases futuras deben revisarse contra el dominio **y** los puertos
 implementados antes de empezar la fase. Cualquier decisión de diseño tomada
 durante la implementación de una fase (como el patrón de inyección del embedder)
 debe reflejarse en las specs de las fases siguientes antes de cerrar el PR.
+
+---
+
+## [2026-07-01] Corrección de bug sin tests de validación
+
+**Fase**: fase-6-chainlit.md / fase-8-deploy.md
+**Categoría**: testing
+
+### Qué se hizo mal
+
+Al corregir el crash del agente en producción (`ValueError: Got unsupported
+early_stopping_method 'generate'` y el bucle `Action: None`), se modificó
+`src/agent/agent.py` —dos cambios en `AgentExecutor`— sin escribir ningún test
+que verificase el comportamiento corregido. Los tests se añadieron solo al ser
+pedidos explícitamente por el usuario en el mensaje siguiente.
+
+### Por qué era un error
+
+Sin tests, el fix queda sin contrato: cualquier refactor futuro que revierta
+`early_stopping_method` a `"generate"` o elimine `"Final Answer"` del mensaje
+`handle_parsing_errors` pasaría desapercibido hasta el siguiente despliegue
+fallido. Además, el bug ya existía en producción y se diagnosticó a partir de
+logs, lo que hace que los tests de regresión tengan aún más valor: habrían
+detectado el error antes de que llegara a HF Spaces.
+
+### Cómo se corrigió
+
+Se añadieron cinco tests en `tests/unit/test_agent.py` agrupados en dos clases:
+
+- `TestCreateAgent` (configuración del executor):
+  - `test_create_agent_uses_force_stopping_method` — verifica `early_stopping_method == "force"`
+  - `test_create_agent_parsing_error_message_includes_final_answer` — verifica que el mensaje guía incluye `"Final Answer"`
+
+- `TestAgentExecutorBehavior` (comportamiento con `FakeListLLM`):
+  - `test_invoke_does_not_raise_when_llm_uses_action_none` — reproduce el bug exacto de producción
+  - `test_invoke_does_not_raise_on_max_iterations_exceeded` — agente que agota `max_iterations=5` sin `ValueError`
+  - `test_invoke_recovers_from_parsing_error_with_final_answer` — recuperación tras un error de formato
+
+### Cómo evitarlo en el futuro
+
+Antes de dar por terminado cualquier bug fix, escribir al menos un test de
+regresión que falle con el código anterior y pase con el código corregido.
+Si el bug se detectó en producción, el test debe reproducir el escenario
+exacto de fallo (en este caso: `FakeListLLM` con `Action: None` en bucle).

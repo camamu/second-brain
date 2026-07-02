@@ -1,16 +1,23 @@
 name: Create Release
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - main
 
 jobs:
   release:
+    # Solo cuando la PR se mergea a main (no cuando se cierra sin merge)
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     permissions:
       contents: write   # necesario para crear tags y releases
+
+    outputs:
+      release_type: ${{ steps.release_type.outputs.type }}
+      version_tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout repository
@@ -18,35 +25,20 @@ jobs:
         with:
           fetch-depth: 0   # necesario para leer el historial de tags
 
-      - name: Get PR labels for this commit
-        id: pr_info
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PR_DATA=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls \
-            -H "Accept: application/vnd.github.groot-preview+json" 2>/dev/null || echo "[]")
-
-          LABELS=$(echo "$PR_DATA" | jq -r '[.[0].labels[]?.name] | @json' 2>/dev/null || echo "[]")
-          PR_TITLE=$(echo "$PR_DATA" | jq -r '.[0].title // ""' 2>/dev/null || echo "")
-          PR_NUMBER=$(echo "$PR_DATA" | jq -r '.[0].number // ""' 2>/dev/null || echo "")
-
-          echo "labels=$LABELS" >> $GITHUB_OUTPUT
-          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "PR: #$PR_NUMBER — $PR_TITLE | Labels: $LABELS"
-
-      - name: Determine release type from labels
+      - name: Determine release type from branch name and PR labels
         id: release_type
         run: |
-          LABELS='${{ steps.pr_info.outputs.labels }}'
-          echo "Labels detectadas: $LABELS"
+          BRANCH='${{ github.event.pull_request.head.ref }}'
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+          echo "Rama origen: $BRANCH"
+          echo "Labels de la PR: $LABELS"
 
-          if echo "$LABELS" | grep -qi '"release:major"'; then
+          if [[ "$BRANCH" == hotfix/* ]]; then
+            echo "type=hotfix" >> $GITHUB_OUTPUT
+            echo "Tipo: hotfix (patch) — detectado por nombre de rama"
+          elif echo "$LABELS" | grep -qi '"release:major"'; then
             echo "type=major" >> $GITHUB_OUTPUT
             echo "Tipo: major"
-          elif echo "$LABELS" | grep -qi '"release:hotfix"'; then
-            echo "type=hotfix" >> $GITHUB_OUTPUT
-            echo "Tipo: hotfix (patch)"
           else
             echo "type=minor" >> $GITHUB_OUTPUT
             echo "Tipo: minor (por defecto)"
@@ -82,8 +74,8 @@ jobs:
         id: changelog
         run: |
           LAST_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
-          PR_TITLE="${{ steps.pr_info.outputs.pr_title }}"
-          PR_NUMBER="${{ steps.pr_info.outputs.pr_number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
 
           if [ -z "$LAST_TAG" ]; then
             COMMITS=$(git log --pretty=format:"- %s (%h)" | head -20)
@@ -94,10 +86,8 @@ jobs:
           {
             echo "## Cambios en ${{ steps.version.outputs.tag }}"
             echo ""
-            if [ -n "$PR_NUMBER" ]; then
-              echo "**PR:** #${PR_NUMBER} — ${PR_TITLE}"
-              echo ""
-            fi
+            echo "**PR:** #${PR_NUMBER} — ${PR_TITLE}"
+            echo ""
             echo "$COMMITS"
           } > CHANGELOG_RELEASE.md
 
@@ -123,3 +113,43 @@ jobs:
     needs: release
     uses: ./.github/workflows/deploy-hf-spaces.yml
     secrets: inherit
+
+  sync-develop:
+    needs: release
+    if: needs.release.outputs.release_type == 'hotfix'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create sync branch and open PR against develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.release.outputs.version_tag }}"
+          VERSION_NUM="${VERSION#v}"
+          SYNC_BRANCH="internal/sync-develop-with-main-${VERSION_NUM}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$SYNC_BRANCH" origin/main
+          git push origin "$SYNC_BRANCH"
+
+          printf "## Sync develop ← main (hotfix %s)\n\n" "$VERSION" > /tmp/pr-body.md
+          printf "Esta PR integra en \`develop\` los cambios del hotfix %s mergeado en \`main\`.\n\n" "$VERSION" >> /tmp/pr-body.md
+          printf "**Origen:** rama de hotfix mergeada a \`main\` y publicada como release %s.\n" "$VERSION" >> /tmp/pr-body.md
+          printf "**Acción requerida:** resolver conflictos si los hay y mergear para mantener \`develop\` al día con \`main\`.\n" >> /tmp/pr-body.md
+
+          gh pr create \
+            --base develop \
+            --head "$SYNC_BRANCH" \
+            --title "chore: sync develop with main after hotfix ${VERSION}" \
+            --body-file /tmp/pr-body.md
