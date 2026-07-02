@@ -139,9 +139,7 @@ class TestAgentExecutorBehavior:
             manage_use_case=MagicMock(spec=ManageNotes),
         )
 
-        result = executor.invoke(
-            {"input": "¿Qué es la arquitectura hexagonal?"}
-        )
+        result = executor.invoke({"input": "¿Qué es la arquitectura hexagonal?"})
 
         assert "output" in result
         for call in search_mock.execute_text.call_args_list:
