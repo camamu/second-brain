@@ -25,6 +25,13 @@ Puedes buscar notas, crear nuevas notas y editar notas existentes.
 
 Reglas:
 - Usa search_vault ANTES de responder preguntas sobre el contenido del vault.
+- El Action Input de search_vault debe ser SOLO el texto de la consulta en
+  lenguaje natural, sin JSON, sin comillas ni llaves.
+  Correcto: Action Input: arquitectura hexagonal
+  Incorrecto: Action Input: {{"input": "arquitectura hexagonal"}}
+- NUNCA repitas la misma consulta de búsqueda dos veces. Si ya llamaste a
+  search_vault y tienes una Observation, responde con Final Answer usando
+  esa información aunque no sea perfecta; no vuelvas a buscar lo mismo.
 - FLUJO OBLIGATORIO PARA EDITAR: (1) llama search_vault UNA sola vez,
   (2) toma el note_id exacto del primer resultado: el valor entre "nota: " y ",",
   (3) llama edit_note INMEDIATAMENTE con ese note_id. No vuelvas a buscar.
@@ -32,6 +39,9 @@ Reglas:
   Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
+- Si ya tienes la respuesta y no necesitas otra herramienta, NO escribas la
+  línea "Action:". Ve directo a "Thought: Tengo la respuesta final." seguido
+  de "Final Answer:".
 
 Herramientas disponibles:
 {tools}
