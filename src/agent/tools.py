@@ -49,6 +49,29 @@ def _safe_json_loads(s: str) -> dict:
     return json.loads("".join(out))
 
 
+def _unwrap_string_input(raw: str) -> str:
+    """Extrae el valor si el LLM envuelve el input en JSON de un solo campo.
+
+    Algunos LLMs entrenados con tool-calling nativo (p. ej. Groq/Llama)
+    generan Action Input como '{"input": "texto"}' aunque la herramienta
+    espera un string plano. Sin este desenvolvimiento, ese JSON crudo se
+    usaría como query de búsqueda, produciendo siempre el mismo resultado
+    genérico y llevando al agente a repetir la misma búsqueda en bucle.
+    """
+    stripped = raw.strip()
+    if not stripped.startswith("{"):
+        return raw
+    try:
+        data = _safe_json_loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return raw
+    if isinstance(data, dict) and len(data) == 1:
+        value = next(iter(data.values()))
+        if isinstance(value, str):
+            return value
+    return raw
+
+
 def create_search_tool(
     search_use_case: SearchNotes,
     strategy: ChunkStrategy,
@@ -64,6 +87,7 @@ def create_search_tool(
     """
 
     def _search(query: str) -> str:
+        query = _unwrap_string_input(query)
         try:
             results = search_use_case.execute_text(query, strategy=strategy)
             logger.info("search_vault: query='%s', resultados=%d", query, len(results))

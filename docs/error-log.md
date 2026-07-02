@@ -318,3 +318,176 @@ Antes de dar por terminado cualquier bug fix, escribir al menos un test de
 regresión que falle con el código anterior y pase con el código corregido.
 Si el bug se detectó en producción, el test debe reproducir el escenario
 exacto de fallo (en este caso: `FakeListLLM` con `Action: None` en bucle).
+
+---
+
+## [2026-07-02] Hipótesis incorrecta sobre el texto que dispara el fallo de parseo ReAct
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: testing
+
+### Qué se hizo mal
+
+Al diagnosticar en logs de producción el mensaje `handle_parsing_errors`
+(`"Formato incorrecto. Cuando necesitas usar una herramienta..."`), se asumió
+que el LLM había escrito un bloque `Action:` con texto libre **sin**
+`Action Input:` junto a un `Final Answer:` en la misma respuesta. El primer
+test de regresión escrito reprodujo exactamente esa forma:
+
+```python
+"Thought: ya tengo la información.\n"
+"Action: No es necesario realizar ninguna acción adicional.\n\n"
+"Thought: Tengo la respuesta final.\n"
+"Final Answer: respuesta ignorada por formato mixto"
+```
+
+El test falló (la aserción, no una excepción): el `AgentExecutor` devolvió
+directamente `"respuesta ignorada por formato mixto"` sin pasar por
+`handle_parsing_errors`, es decir, el escenario "reproducido" ni siquiera
+disparaba el bug.
+
+### Por qué era un error
+
+El log de Chainlit en modo `verbose=True` solo imprime el texto del LLM
+cuando `ReActSingleInputOutputParser.parse()` tiene éxito (`on_agent_action`
+/ `on_agent_finish`); cuando el parseo falla, el texto crudo que lo causó
+nunca aparece en el log — solo se ve el mensaje de recuperación como
+Observation. Se asumió una forma de fallo sin verificar la lógica real del
+parser, lo que produjo un test verde que en realidad no ejercitaba el
+código de recuperación: si el fix del prompt hubiera sido incorrecto, el
+test no lo habría detectado.
+
+Repasando la lógica de `ReActSingleInputOutputParser`: si el texto contiene
+`Action:` pero **no** hace match con el regex `Action:.*Action Input:.*`, el
+parser ignora esa línea y, si además hay `Final Answer:`, lo toma
+directamente como `AgentFinish` — no lanza excepción. El error real
+(`"Parsing LLM output produced both a final answer and a parse-able
+action"`, ya documentado en la entrada `[2026-06-18]` de este mismo log)
+solo ocurre cuando el texto tiene un bloque `Action:`/`Action Input:` que sí
+matchea el regex **y además** un `Final Answer:`.
+
+### Cómo se corrigió
+
+Se reescribió el test con un bloque `Action`/`Action Input` completo y
+parseable junto al `Final Answer`:
+
+```python
+"Thought: ya tengo la información pero seré explícito.\n"
+"Action: search_vault\n"
+"Action Input: no hace falta\n"
+"Thought: Tengo la respuesta final.\n"
+"Final Answer: respuesta ignorada por formato mixto"
+```
+
+Con este texto el test sí reproduce el `OutputParserException` real y
+verifica la recuperación en el turno siguiente.
+
+### Cómo evitarlo en el futuro
+
+Cuando se diagnostica un bug a partir de logs sin la traza cruda exacta
+(porque la librería no la loguea en el caso de fallo), verificar la
+hipótesis contra el código fuente de la librería o contra una entrada
+previa de `docs/error-log.md` antes de escribir el test de regresión —  y
+confirmar en rojo-verde (el test falla con el código anterior, pasa con el
+corregido) en vez de asumir que un test que pasa a la primera reproduce el
+bug real.
+
+---
+
+## [2026-07-02] CLAUDE.md desactualizado respecto al código real
+
+**Fase**: transversal (detectado durante fase-6-chainlit.md / hotfix del agente)
+**Categoría**: documentación
+
+### Qué se hizo mal
+
+`CLAUDE.md` no se había actualizado desde (aproximadamente) el cierre de la
+Fase 4. Seguía describiendo el estado del proyecto como si `src/agent/`,
+`src/app/`, `app.py`, `src/adapters/evaluation_repo.py` y los workflows de
+CI no existieran o estuvieran "sin implementar". Ejemplos concretos:
+
+- Comando documentado: `chainlit run src/app/__init__.py` (marcado "not yet
+  implemented"). Comando real: `chainlit run app.py`.
+- Variables de entorno documentadas (`OLLAMA_LLM_MODEL`, ausencia de
+  `READONLY_MODE`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `LOG_LEVEL`) no coincidían
+  con `.env.example`, la fuente real.
+- Sección "Current state" listaba 73 tests y omitía `src/agent/`,
+  `tests/unit/test_agent.py`, `test_tools.py`, `test_metrics.py`,
+  `scripts/check_architecture.py`, `scripts/format.sh` y los workflows de
+  `.github/workflows/`.
+- No mencionaba las lecciones ya registradas en este mismo `docs/error-log.md`
+  (p. ej. la entrada `[2026-06-18]` sobre modelos ReAct incompatibles).
+
+### Por qué era un error
+
+`CLAUDE.md` es la primera fuente que se lee al empezar cualquier sesión en
+este repo — es la razón de ser del fichero. Si describe un estado pasado del
+proyecto, induce a error en cascada: se referencian comandos que ya no
+existen, se ignoran adaptadores/tests reales, y las "Current lessons" no
+reflejan los aprendizajes más recientes que sí están en `docs/error-log.md`.
+El propio `CLAUDE.md` instruye "Read it at the start of each phase" sobre el
+error-log, pero nadie aplicó la misma disciplina al propio `CLAUDE.md`: no
+hay ningún paso del flujo de trabajo que lo mantenga sincronizado con el
+código después de cada fase.
+
+### Cómo se corrigió
+
+Se revisó `CLAUDE.md` contra el estado real del repo (`find src -name
+"*.py"`, `.env.example`, `tests/unit/`, `.github/workflows/`,
+`docs/error-log.md`) y se corrigieron las secciones "Commands", "Architecture"
+(añadidas `Agent` y `App`), "Environment variables", "Current state" y
+"Error log" para que coincidan con el código real en lugar de con el estado
+de hace varias fases.
+
+### Cómo evitarlo en el futuro
+
+Al cerrar cada fase (`tasks/fase-N-*.md`) o cualquier PR que añada un
+adaptador, script, comando o variable de entorno nuevos, actualizar
+`CLAUDE.md` en el mismo cambio — no como tarea aparte. Antes de dar por
+cerrada una fase, comparar explícitamente `CLAUDE.md` contra
+`find src -name "*.py" ! -name "__init__.py"`, `.env.example` y el número
+de tests (`pytest tests/unit/ -q`) para detectar drift antes de mergear.
+
+---
+
+## [2026-07-02] "Lint limpio" verificado solo a medias (ruff check sin ruff format)
+
+**Fase**: fase-6-chainlit.md (hotfix del agente)
+**Categoría**: testing
+
+### Qué se hizo mal
+
+Tras aplicar los fixes del bucle de `search_vault`, se afirmó que "ruff y
+mypy están limpios" habiendo ejecutado solo `ruff check src/ tests/`. Nunca
+se corrió `ruff format --check`. El commit se subió a la rama remota con
+`tests/unit/test_agent.py` sin formatear (una línea que ruff format habría
+partido en varias). El usuario lo detectó por el CI (`Would reformat:
+tests/unit/test_agent.py`), no el agente.
+
+### Por qué era un error
+
+`ruff check` (linter) y `ruff format` (formateador) son herramientas
+distintas que comprueban cosas distintas: una detecta errores/convenciones
+de código, la otra el formato exacto (line-wrapping, comillas, etc.). Pasar
+una no garantiza pasar la otra. El propio `CLAUDE.md` ya documentaba en la
+entrada "Lint after merges" que hay que correr ambas, pero esa lección
+estaba redactada solo para el caso de resolución de conflictos de merge, no
+como regla general antes de cualquier commit — por eso no se activó aquí.
+
+### Cómo se corrigió
+
+```bash
+ruff format src/ tests/   # reformatea
+ruff check src/ tests/    # lint
+pytest tests/unit/ -q     # confirma que el reformateo no rompe nada
+```
+
+Se creó un commit de estilo (`ef10b74`) separado del fix funcional y se
+volvió a subir.
+
+### Cómo evitarlo en el futuro
+
+Antes de dar por cerrado cualquier cambio de código (no solo tras merges),
+correr siempre `ruff format <paths> && ruff check <paths>` — nunca uno sin
+el otro — igual que ya hace `scripts/format.sh`. Preferir invocar ese script
+directamente en vez de recordar los dos comandos por separado.
