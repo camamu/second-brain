@@ -1,0 +1,27 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="obsidianGradientAvatar" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="32" fill="url(#obsidianGradientAvatar)"/>
+  <g stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity="0.85">
+    <line x1="32" y1="20" x2="21" y2="29"/>
+    <line x1="32" y1="20" x2="43" y2="29"/>
+    <line x1="21" y1="29" x2="25" y2="41"/>
+    <line x1="43" y1="29" x2="39" y2="41"/>
+    <line x1="25" y1="41" x2="39" y2="41"/>
+    <line x1="32" y1="20" x2="32" y2="31"/>
+    <line x1="32" y1="31" x2="25" y2="41"/>
+    <line x1="32" y1="31" x2="39" y2="41"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="32" cy="20" r="3.6"/>
+    <circle cx="21" cy="29" r="3"/>
+    <circle cx="43" cy="29" r="3"/>
+    <circle cx="25" cy="41" r="3"/>
+    <circle cx="39" cy="41" r="3"/>
+    <circle cx="32" cy="31" r="2.4"/>
+  </g>
+</svg>

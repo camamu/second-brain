@@ -6,10 +6,12 @@ sobre el vault de Obsidian.
 """
 
 import logging
+from typing import Callable
 
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseLanguageModel
 
 from src.agent.tools import create_edit_tool, create_note_tool, create_search_tool
@@ -32,6 +34,17 @@ Reglas:
   Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
+- En cuanto tengas información suficiente para responder, NO generes una
+  nueva Action: pasa directamente a "Thought: Tengo la respuesta final"
+  seguido de "Final Answer: <respuesta>".
+- Action debe ser SIEMPRE uno de los nombres exactos de {tool_names}. Nunca
+  escribas una Action como "No se requiere ninguna acción" ni ninguna frase
+  que no sea un nombre de herramienta: si no necesitas ninguna herramienta
+  más, responde con Final Answer.
+- Las líneas "Observation" son mensajes internos de depuración, incluidos los
+  que empiezan por "Formato incorrecto": NUNCA copies su contenido literal
+  en tu Final Answer. Tu Final Answer siempre es una respuesta natural
+  dirigida al usuario, jamás un mensaje de error ni instrucciones de formato.
 
 Herramientas disponibles:
 {tools}
@@ -62,6 +75,43 @@ _REACT_PROMPT = PromptTemplate(
     ],
     template=_REACT_PROMPT_TEMPLATE,
 )
+
+_PARSING_ERROR_TEMPLATE = (
+    "[Mensaje interno para el agente, no es la respuesta al usuario] Tu "
+    "última salida no siguió el formato ReAct. Corrige tu PRÓXIMO turno "
+    "usando EXACTAMENTE este formato:\n"
+    "Thought: <razonamiento>\n"
+    "Action: <una de estas herramientas: {tool_names}>\n"
+    "Action Input: <texto de entrada>\n"
+    "Si ya tienes toda la información necesaria para responder, IGNORA esta "
+    "corrección y escribe directamente:\n"
+    "Thought: Tengo la respuesta final\n"
+    "Final Answer: <tu respuesta real al usuario; nunca copies este mensaje>"
+)
+
+
+def _build_parsing_error_handler(
+    tool_names: list[str],
+) -> Callable[[OutputParserException], str]:
+    """Crea el manejador de errores de parseo del ReAct output parser.
+
+    El mensaje generado incluye los nombres reales de las herramientas
+    disponibles y advierte explícitamente al LLM de que no debe copiar este
+    texto de corrección como si fuera su respuesta final al usuario.
+
+    Args:
+        tool_names: Nombres de las herramientas disponibles para el agente.
+
+    Returns:
+        Función que LangChain invoca con la excepción de parseo y devuelve
+        el texto de la Observation.
+    """
+    message = _PARSING_ERROR_TEMPLATE.format(tool_names=", ".join(tool_names))
+
+    def _handle_parsing_error(error: OutputParserException) -> str:  # noqa: ARG001
+        return message
+
+    return _handle_parsing_error
 
 
 def create_agent(
@@ -106,14 +156,11 @@ def create_agent(
         tools=tools,
         memory=memory,
         verbose=True,
-        handle_parsing_errors=(
-            "Formato incorrecto. Usa EXACTAMENTE este formato:\n"
-            "Thought: <razonamiento>\n"
-            "Action: <nombre_herramienta>\n"
-            "Action Input: <texto_de_entrada>\n"
+        handle_parsing_errors=_build_parsing_error_handler(
+            [tool.name for tool in tools]
         ),
         max_iterations=5,
-        early_stopping_method="generate",
+        early_stopping_method="force",
     )
 
     logger.info(

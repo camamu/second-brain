@@ -1,16 +1,23 @@
 """Chainlit entrypoint — Obsidian RAG Agent."""
 
 import logging
+import sys
+from pathlib import Path
 
-import chainlit as cl
+# Chainlit solo añade el directorio de este fichero a sys.path al cargar el
+# módulo (chainlit.config.load_module), no la raíz del repo; sin esto, los
+# imports absolutos `from src...` fallan con ModuleNotFoundError.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.agent.agent import create_agent
-from src.application.ingest_vault import IngestVault
-from src.application.manage_notes import ManageNotes
-from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
-from src.domain.ports import ObsidianRagError
-from src.infrastructure.config import (
+import chainlit as cl  # noqa: E402
+
+from src.agent.agent import create_agent  # noqa: E402
+from src.application.ingest_vault import IngestVault  # noqa: E402
+from src.application.manage_notes import ManageNotes  # noqa: E402
+from src.application.search_notes import SearchNotes  # noqa: E402
+from src.domain.models import ChunkStrategy  # noqa: E402
+from src.domain.ports import ObsidianRagError  # noqa: E402
+from src.infrastructure.config import (  # noqa: E402
     get_chunker,
     get_langchain_llm,
     get_note_loader,

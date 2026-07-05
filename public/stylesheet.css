@@ -1,0 +1,54 @@
+:root {
+  --primary: 262 83% 58%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 217 91% 60%;
+  --ring: 262 83% 58%;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --primary: 262 83% 66%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 217 91% 66%;
+  --background: 240 10% 8%;
+  --ring: 262 83% 66%;
+}
+
+#header,
+header {
+  background: linear-gradient(90deg, #6d28d9 0%, #2563eb 100%) !important;
+}
+
+#header a,
+header a,
+#header svg,
+header svg {
+  color: #ffffff !important;
+}
+
+.step,
+.message-assistant {
+  border-left: 3px solid hsl(var(--primary));
+}
+
+pre,
+code {
+  border-radius: var(--radius);
+}
+
+button[type="submit"],
+.bg-primary {
+  background-color: hsl(var(--primary)) !important;
+}
+
+.markdown-body a,
+.prose a {
+  color: hsl(var(--accent));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-body,
+.prose {
+  line-height: 1.65;
+}
