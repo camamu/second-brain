@@ -4,6 +4,7 @@ on:
   release:
     types: [published]   # solo se activa cuando se publica una release real (no draft)
   workflow_call:         # permite ser llamado desde create-release.yml
+  workflow_dispatch:     # permite lanzarlo manualmente desde la UI o gh CLI
 
 jobs:
   deploy:

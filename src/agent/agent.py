@@ -27,6 +27,13 @@ Puedes buscar notas, crear nuevas notas y editar notas existentes.
 
 Reglas:
 - Usa search_vault ANTES de responder preguntas sobre el contenido del vault.
+- El Action Input de search_vault debe ser SOLO el texto de la consulta en
+  lenguaje natural, sin JSON, sin comillas ni llaves.
+  Correcto: Action Input: arquitectura hexagonal
+  Incorrecto: Action Input: {{"input": "arquitectura hexagonal"}}
+- NUNCA repitas la misma consulta de búsqueda dos veces. Si ya llamaste a
+  search_vault y tienes una Observation, responde con Final Answer usando
+  esa información aunque no sea perfecta; no vuelvas a buscar lo mismo.
 - FLUJO OBLIGATORIO PARA EDITAR: (1) llama search_vault UNA sola vez,
   (2) toma el note_id exacto del primer resultado: el valor entre "nota: " y ",",
   (3) llama edit_note INMEDIATAMENTE con ese note_id. No vuelvas a buscar.
@@ -34,13 +41,12 @@ Reglas:
   Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
-- En cuanto tengas información suficiente para responder, NO generes una
-  nueva Action: pasa directamente a "Thought: Tengo la respuesta final"
-  seguido de "Final Answer: <respuesta>".
+- Si ya tienes la respuesta y no necesitas otra herramienta, NO escribas la
+  línea "Action:". Ve directo a "Thought: Tengo la respuesta final." seguido
+  de "Final Answer:".
 - Action debe ser SIEMPRE uno de los nombres exactos de {tool_names}. Nunca
   escribas una Action como "No se requiere ninguna acción" ni ninguna frase
-  que no sea un nombre de herramienta: si no necesitas ninguna herramienta
-  más, responde con Final Answer.
+  que no sea un nombre de herramienta.
 - Las líneas "Observation" son mensajes internos de depuración, incluidos los
   que empiezan por "Formato incorrecto": NUNCA copies su contenido literal
   en tu Final Answer. Tu Final Answer siempre es una respuesta natural
@@ -77,15 +83,13 @@ _REACT_PROMPT = PromptTemplate(
 )
 
 _PARSING_ERROR_TEMPLATE = (
-    "[Mensaje interno para el agente, no es la respuesta al usuario] Tu "
-    "última salida no siguió el formato ReAct. Corrige tu PRÓXIMO turno "
-    "usando EXACTAMENTE este formato:\n"
+    "[Mensaje interno para el agente, no es la respuesta al usuario]\n"
+    "Cuando necesitas usar una herramienta:\n"
     "Thought: <razonamiento>\n"
     "Action: <una de estas herramientas: {tool_names}>\n"
-    "Action Input: <texto de entrada>\n"
-    "Si ya tienes toda la información necesaria para responder, IGNORA esta "
-    "corrección y escribe directamente:\n"
-    "Thought: Tengo la respuesta final\n"
+    "Action Input: <texto de entrada>\n\n"
+    "Cuando ya tienes la respuesta final:\n"
+    "Thought: Tengo la respuesta final.\n"
     "Final Answer: <tu respuesta real al usuario; nunca copies este mensaje>"
 )
 
@@ -159,7 +163,7 @@ def create_agent(
         handle_parsing_errors=_build_parsing_error_handler(
             [tool.name for tool in tools]
         ),
-        max_iterations=5,
+        max_iterations=10,
         early_stopping_method="force",
     )
 
