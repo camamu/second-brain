@@ -145,7 +145,14 @@ def create_note_tool(manage_use_case: ManageNotes) -> Tool:
         description=(
             "Crea una nueva nota en el vault de Obsidian. "
             "El input debe ser un JSON con campos: "
-            "title (str, requerido), content (str, requerido), tags (lista, opcional)."
+            "title (str, requerido), content (str, requerido), "
+            "tags (lista de strings, opcional). "
+            "IMPORTANTE sobre tags: siempre que el usuario mencione un tema, "
+            "categoría o pida explícitamente tags, inclúyelos en el campo "
+            'JSON \'tags\' (ej. "tags": ["arquitectura", "microservicios"]). '
+            "NUNCA escribas '#tag' dentro de content: los tags fuera del "
+            "campo 'tags' no se guardan en el frontmatter y no son "
+            "recuperables por categoría."
         ),
     )
 
@@ -165,10 +172,11 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
             data = _safe_json_loads(tool_input)
             note_id = data["note_id"]
             content = data["content"]
+            tags = data.get("tags")
         except (json.JSONDecodeError, KeyError):
-            return "Formato incorrecto. Usa JSON con campos: note_id, content"
+            return "Formato incorrecto. Usa JSON con campos: note_id, content, tags (opcional)"
         try:
-            note = manage_use_case.update(note_id, content)
+            note = manage_use_case.update(note_id, content, tags)
             logger.info("edit_note: nota actualizada '%s'", note.id)
             return f"Nota actualizada: {note.id}"
         except NoteNotFoundError:
@@ -189,6 +197,11 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
             "El input debe ser un JSON con campos: "
             "note_id (str, ruta exacta obtenida de search_vault), "
             "content (str, nuevo contenido completo de la nota — "
-            "NO incluyas marcadores de búsqueda como '(nota: X, score: Y)')."
+            "NO incluyas marcadores de búsqueda como '(nota: X, score: Y)'), "
+            "tags (lista de strings, opcional). "
+            "IMPORTANTE sobre tags: si el usuario pide añadir tags a esta "
+            "nota, inclúyelos en el campo JSON 'tags' — se SUMAN a los tags "
+            "que ya tiene la nota, no los reemplazan. "
+            "NUNCA escribas '#tag' dentro de content."
         ),
     )

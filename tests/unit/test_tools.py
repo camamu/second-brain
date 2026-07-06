@@ -115,8 +115,28 @@ class TestEditNoteTool:
 
         result = tool.func(payload)
 
+        # Sin tags en el payload, se propaga None (preserva tags actuales)
         manage_uc.update.assert_called_once_with(
-            "notas/existente.md", "Nuevo contenido"
+            "notas/existente.md", "Nuevo contenido", None
+        )
+        assert "notas/existente.md" in result
+
+    def test_edit_note_tool_with_tags_propagates_to_use_case(self):
+        manage_uc = MagicMock(spec=ManageNotes)
+        manage_uc.update.return_value = _make_note("notas/existente.md")
+        tool = create_edit_tool(manage_uc)
+        payload = json.dumps(
+            {
+                "note_id": "notas/existente.md",
+                "content": "Nuevo contenido",
+                "tags": ["nuevo-tag"],
+            }
+        )
+
+        result = tool.func(payload)
+
+        manage_uc.update.assert_called_once_with(
+            "notas/existente.md", "Nuevo contenido", ["nuevo-tag"]
         )
         assert "notas/existente.md" in result
 

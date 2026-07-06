@@ -13,6 +13,7 @@ import frontmatter
 
 from src.domain.models import Note, NoteType
 from src.domain.ports import NoteLoader, NoteNotFoundError, NoteWriter, VaultWriteError
+from src.domain.tags import normalize_tags
 
 logger = logging.getLogger(__name__)
 
@@ -122,16 +123,18 @@ class ObsidianLoader(NoteLoader, NoteWriter):
         if path.exists():
             raise VaultWriteError(f"Ya existe una nota en '{path}'")
 
-        post = frontmatter.Post(content, title=title, tags=tags)
+        post = frontmatter.Post(content, title=title, tags=normalize_tags(tags))
         path.write_text(frontmatter.dumps(post), encoding="utf-8")
         return self._parse(path)
 
-    def update(self, note_id: str, content: str) -> Note:
+    def update(self, note_id: str, content: str, tags: List[str] | None = None) -> Note:
         """Actualiza el contenido de una nota preservando su frontmatter.
 
         Args:
             note_id: ID de la nota a actualizar.
             content: Nuevo contenido markdown.
+            tags: Tags a añadir a los existentes (union, sin eliminarlos).
+                None preserva los tags actuales sin cambios.
 
         Returns:
             La nota con el contenido actualizado.
@@ -144,6 +147,8 @@ class ObsidianLoader(NoteLoader, NoteWriter):
         raw = path.read_text(encoding="utf-8")
         post = frontmatter.loads(raw)
         post.content = content
+        if tags is not None:
+            post["tags"] = normalize_tags(existing.tags + tags)
         path.write_text(frontmatter.dumps(post), encoding="utf-8")
         return self._parse(path)
 
@@ -175,9 +180,8 @@ class ObsidianLoader(NoteLoader, NoteWriter):
         title: str = str(fm.get("title") or path.stem)
 
         tags_raw = fm.get("tags", [])
-        tags: List[str] = (
-            list(tags_raw) if isinstance(tags_raw, list) else [str(tags_raw)]
-        )
+        raw_list = list(tags_raw) if isinstance(tags_raw, list) else [str(tags_raw)]
+        tags: List[str] = normalize_tags(raw_list)
 
         type_str = str(fm.get("type", "")).lower()
         note_type = _NOTE_TYPE_MAP.get(type_str, NoteType.OTHER)
