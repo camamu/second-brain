@@ -32,6 +32,20 @@ def test_obsidian_loader_load_all_parses_frontmatter_correctly(tmp_vault):
     assert note.note_type == NoteType.DOC
 
 
+def test_obsidian_loader_load_all_normalizes_malformed_tags(tmp_vault):
+    # Arrange — nota con un tag con espacio+mayúsculas y otro válido
+    (tmp_vault / "roto.md").write_text(
+        '---\ntags: ["Personajes Públicos", castores]\n---\nCuerpo.',
+        encoding="utf-8",
+    )
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act
+    notes = {n.id: n for n in loader.load_all()}
+    note = notes["roto"]
+    # Assert — el espacio pasa a guion y todo a minúsculas
+    assert note.tags == ["personajes-públicos", "castores"]
+
+
 def test_obsidian_loader_load_all_extracts_backlinks(tmp_vault):
     # Arrange
     loader = ObsidianLoader(str(tmp_vault))
@@ -137,6 +151,22 @@ def test_obsidian_loader_create_writes_file_with_frontmatter(tmp_vault):
     assert (tmp_vault / "00-inbox" / "nueva-nota.md").exists()
 
 
+def test_obsidian_loader_create_normalizes_tags_as_yaml_list(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act — tag con espacio se normaliza antes de escribir el frontmatter
+    loader.create(
+        title="Con tags raros",
+        content="Contenido.",
+        tags=["Foo Bar", "baz"],
+    )
+    # Assert — al releer, los tags están normalizados y como lista YAML
+    reloaded = loader.load_by_id("00-inbox/con-tags-raros")
+    assert reloaded.tags == ["foo-bar", "baz"]
+    raw = (tmp_vault / "00-inbox" / "con-tags-raros.md").read_text(encoding="utf-8")
+    assert "- foo-bar" in raw
+
+
 def test_obsidian_loader_create_existing_file_raises_write_error(tmp_vault):
     # Arrange
     loader = ObsidianLoader(str(tmp_vault))
@@ -161,6 +191,27 @@ def test_obsidian_loader_update_preserves_frontmatter(tmp_vault):
     assert updated.content == "Nuevo contenido."
     assert updated.tags == original.tags
     assert updated.note_type == original.note_type
+
+
+def test_obsidian_loader_update_with_tags_merges_with_existing(tmp_vault):
+    # Arrange — "aprendizaje-profundo" ya tiene tags {"ml", "ia"} (ver fixture)
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act
+    updated = loader.update(
+        "aprendizaje-profundo", "Nuevo contenido.", tags=["Nuevo Tag"]
+    )
+    # Assert — se suma el nuevo tag normalizado, sin perder los existentes
+    assert set(updated.tags) == {"ml", "ia", "nuevo-tag"}
+
+
+def test_obsidian_loader_update_without_tags_preserves_existing(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    original = loader.load_by_id("aprendizaje-profundo")
+    # Act — tags=None (default) no debe tocar los tags actuales
+    updated = loader.update("aprendizaje-profundo", "Nuevo contenido.")
+    # Assert
+    assert updated.tags == original.tags
 
 
 def test_obsidian_loader_update_nonexistent_raises_not_found(tmp_vault):

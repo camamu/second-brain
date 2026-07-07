@@ -180,6 +180,35 @@ def test_chroma_store_delete_by_note_removes_all_chunks(
     assert store.count() == 1
 
 
+def test_chroma_store_list_note_ids_returns_unique_ids_across_collections(
+    store: ChromaVectorStore,
+) -> None:
+    # Arrange — 2 chunks de la misma nota en fixed, 1 chunk de otra en markdown
+    store.add_chunks(
+        [
+            _make_chunk("note-001", 0, "Primer chunk.", ChunkStrategy.FIXED_SIZE),
+            _make_chunk("note-001", 1, "Segundo chunk.", ChunkStrategy.FIXED_SIZE),
+            _make_chunk("note-002", 0, "Otra nota.", ChunkStrategy.MARKDOWN_HEADER),
+        ]
+    )
+
+    # Act
+    note_ids = store.list_note_ids()
+
+    # Assert — sin duplicados, ordenado
+    assert note_ids == ["note-001", "note-002"]
+
+
+def test_chroma_store_list_note_ids_empty_store_returns_empty_list(
+    store: ChromaVectorStore,
+) -> None:
+    # Act
+    note_ids = store.list_note_ids()
+
+    # Assert
+    assert note_ids == []
+
+
 def test_chroma_store_count_returns_total_across_collections(
     store: ChromaVectorStore,
 ) -> None:
