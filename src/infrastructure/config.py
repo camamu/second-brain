@@ -145,11 +145,7 @@ def get_vector_store(strategy: ChunkStrategy | None = None) -> VectorStore:
     from src.adapters.vector_stores.chroma_store import ChromaVectorStore
 
     persist_dir = os.getenv("CHROMA_PERSIST_DIR", "data/chroma_db")
-    resolved = (
-        strategy
-        if strategy is not None
-        else _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
-    )
+    resolved = strategy if strategy is not None else get_strategy_from_env()
     embedder = get_embedder()
     logger.info(
         "VectorStore: ChromaVectorStore (persist_dir=%s, strategy=%s)",
@@ -226,8 +222,20 @@ def get_chunker_from_env() -> BaseChunker:
     Raises:
         ConfigError: Si CHUNKER_STRATEGY tiene un valor desconocido.
     """
-    strategy = _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
-    return get_chunker(strategy)
+    return get_chunker(get_strategy_from_env())
+
+
+def get_strategy_from_env() -> ChunkStrategy:
+    """Devuelve la estrategia de chunking indicada por CHUNKER_STRATEGY.
+
+    Returns:
+        La ChunkStrategy correspondiente a la variable de entorno
+        CHUNKER_STRATEGY (default "fixed").
+
+    Raises:
+        ConfigError: Si CHUNKER_STRATEGY tiene un valor desconocido.
+    """
+    return _parse_strategy(os.getenv("CHUNKER_STRATEGY", "fixed"))
 
 
 def is_readonly() -> bool:

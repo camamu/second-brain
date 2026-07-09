@@ -8,11 +8,21 @@ from langchain_community.llms.fake import FakeListLLM
 from src.agent.agent import create_agent
 from src.application.manage_notes import ManageNotes
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
+from src.domain.models import ChunkStrategy, SearchResult
 
 
 def _make_fake_llm() -> FakeListLLM:
     return FakeListLLM(responses=["Final Answer: respuesta de prueba"])
+
+
+def _make_search_result(rank: int = 1) -> SearchResult:
+    return SearchResult(
+        chunk_id=f"chunk-{rank}",
+        note_id=f"notas/nota-{rank}.md",
+        content=f"Contenido del chunk {rank}",
+        score=0.9 - rank * 0.05,
+        rank=rank,
+    )
 
 
 class TestCreateAgent:
@@ -63,6 +73,22 @@ class TestCreateAgent:
 
         assert isinstance(executor.handle_parsing_errors, str)
         assert "Final Answer" in executor.handle_parsing_errors
+
+    def test_create_agent_forwards_last_results_to_search_tool(self):
+        search_uc = MagicMock(spec=SearchNotes)
+        search_uc.execute_text.return_value = [_make_search_result(1)]
+        last_results: list[SearchResult] = []
+
+        executor = create_agent(
+            llm=_make_fake_llm(),
+            search_use_case=search_uc,
+            manage_use_case=MagicMock(spec=ManageNotes),
+            last_results=last_results,
+        )
+        search_tool = next(t for t in executor.tools if t.name == "search_vault")
+        search_tool.func("query de prueba")
+
+        assert len(last_results) == 1
 
 
 class TestAgentExecutorBehavior:
