@@ -11,7 +11,7 @@ from langchain.tools import Tool
 
 from src.application.manage_notes import ManageNotes
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
+from src.domain.models import ChunkStrategy, SearchResult
 from src.domain.ports import NoteNotFoundError, VaultWriteError, VectorStoreError
 
 logger = logging.getLogger(__name__)
@@ -75,12 +75,17 @@ def _unwrap_string_input(raw: str) -> str:
 def create_search_tool(
     search_use_case: SearchNotes,
     strategy: ChunkStrategy,
+    last_results: list[SearchResult] | None = None,
 ) -> Tool:
     """Crea la herramienta search_vault para el agente ReAct.
 
     Args:
         search_use_case: Caso de uso de búsqueda semántica.
         strategy: Estrategia de chunking activa.
+        last_results: lista mutable donde se guardan (sustituyendo el
+            contenido anterior) los SearchResult de la última búsqueda,
+            para que la capa de presentación (Chainlit) pueda adjuntarlos
+            como citas sin cambiar el contrato de retorno de esta tool.
 
     Returns:
         Tool de LangChain que busca en el vault de Obsidian.
@@ -90,6 +95,9 @@ def create_search_tool(
         query = _unwrap_string_input(query)
         try:
             results = search_use_case.execute_text(query, strategy=strategy)
+            if last_results is not None:
+                last_results.clear()
+                last_results.extend(results)
             logger.info("search_vault: query='%s', resultados=%d", query, len(results))
             if not results:
                 return "No se encontraron resultados para la consulta."

@@ -1,4 +1,4 @@
-# 🧠 Obsidian RAG Agent
+# 🧠 second-brain
 
 Bienvenido a tu asistente conversacional para Obsidian.
 

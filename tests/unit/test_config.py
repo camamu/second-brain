@@ -85,6 +85,41 @@ def test_get_chunker_from_env_raises_config_error_for_invalid_strategy(
         config_module.get_chunker_from_env()
 
 
+def test_get_strategy_from_env_default_returns_fixed_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.delenv("CHUNKER_STRATEGY", raising=False)
+
+    # Act
+    strategy = config_module.get_strategy_from_env()
+
+    # Assert
+    assert strategy == ChunkStrategy.FIXED_SIZE
+
+
+def test_get_strategy_from_env_reads_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    monkeypatch.setenv("CHUNKER_STRATEGY", "markdown")
+
+    # Act
+    strategy = config_module.get_strategy_from_env()
+
+    # Assert
+    assert strategy == ChunkStrategy.MARKDOWN_HEADER
+
+
+def test_get_strategy_from_env_invalid_value_raises_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("CHUNKER_STRATEGY", "unknown_strategy")
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="CHUNKER_STRATEGY inválida"):
+        config_module.get_strategy_from_env()
+
+
 def test_require_raises_config_error_when_var_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

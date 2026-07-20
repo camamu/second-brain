@@ -15,7 +15,7 @@ from langchain_core.language_models import BaseLanguageModel
 from src.agent.tools import create_edit_tool, create_note_tool, create_search_tool
 from src.application.manage_notes import ManageNotes
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
+from src.domain.models import ChunkStrategy, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ def create_agent(
     manage_use_case: ManageNotes,
     strategy: ChunkStrategy = ChunkStrategy.FIXED_SIZE,
     readonly: bool = False,
+    last_results: list[SearchResult] | None = None,
 ) -> AgentExecutor:
     """Construye el agente ReAct con las herramientas del vault.
 
@@ -94,11 +95,13 @@ def create_agent(
         manage_use_case: Caso de uso de gestión de notas.
         strategy: Estrategia de chunking para search_vault.
         readonly: Si True, solo incluye search_vault (sin create/edit).
+        last_results: lista mutable reenviada a create_search_tool para
+            capturar los SearchResult de la última búsqueda (ver tools.py).
 
     Returns:
         AgentExecutor listo para recibir preguntas del usuario.
     """
-    search_tool = create_search_tool(search_use_case, strategy)
+    search_tool = create_search_tool(search_use_case, strategy, last_results)
     if readonly:
         tools = [search_tool]
     else:

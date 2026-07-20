@@ -491,3 +491,55 @@ Antes de dar por cerrado cualquier cambio de código (no solo tras merges),
 correr siempre `ruff format <paths> && ruff check <paths>` — nunca uno sin
 el otro — igual que ya hace `scripts/format.sh`. Preferir invocar ese script
 directamente en vez de recordar los dos comandos por separado.
+
+---
+
+## [2026-07-09] `await` suprimido por analogía en vez de verificar el método concreto
+
+**Fase**: refactor de `src/app/__init__.py` (chunking a Settings + comandos "/")
+**Categoría**: diseño / verificación
+
+### Qué se hizo mal
+
+Al llamar a `cl.context.emitter.set_commands([...])`, `mypy` marcó
+`Coroutine[...] must be used` (el stub de `BaseChainlitEmitter` declara el
+método `async def`). En vez de comprobar la implementación concreta que se
+ejecuta en runtime (`ChainlitEmitter.set_commands`), se resolvió por
+analogía con otra llamada cercana en el mismo fichero de Chainlit
+(`chat_settings.py` invoca `context.emitter.set_chat_settings(...)` sin
+`await`) y se silenció el error con `# type: ignore[unused-coroutine]`. La
+prueba manual (`chainlit run app.py`) reveló el fallo real: sin `await`,
+Python emite `RuntimeWarning: coroutine 'AsyncServer.emit' was never
+awaited` y el panel de comandos nunca llega al cliente — un fallo
+completamente silencioso (ni excepción ni test unitario lo detecta).
+
+### Por qué era un error
+
+Dos métodos que se ven parecidos (`set_chat_settings` y `set_commands`) en
+la misma clase pueden tener implementaciones completamente distintas:
+`set_chat_settings` solo hace una asignación local síncrona
+(`self.session.chat_settings = settings`), mientras que `set_commands`
+delega en `self.emit(...)`, que en tiempo de ejecución es el `emit` async de
+`python-socketio`. La analogía por "se ve igual" sin leer el cuerpo del
+método concreto llevó a la conclusión contraria a la correcta. Además, este
+tipo de bug (falta de `await` en una llamada fire-and-forget) no lo detecta
+ni `pytest` ni `mypy` una vez suprimido con `type: ignore` — solo una
+ejecución real del servidor con una advertencia de runtime.
+
+### Cómo se corrigió
+
+Se leyó el cuerpo real de `ChainlitEmitter.set_commands` (delega en
+`self.emit`) frente a `set_chat_settings` (asignación directa), se confirmó
+con `chainlit run app.py` que sin `await` aparecía el `RuntimeWarning`, y se
+añadió el `await` (quitando el `type: ignore`).
+
+### Cómo evitarlo en el futuro
+
+Cuando `mypy` señale una discrepancia entre lo que "parece" el patrón
+establecido en el código y lo que el stub declara, no resolver por analogía
+con una llamada vecina sin leer el cuerpo del método concreto que se
+ejecuta. Y, en general: un `# type: ignore` sobre un error de
+`unused-coroutine`/`await` faltante es una señal de alarma — antes de
+silenciarlo, verificar con una ejecución real (no solo tests), porque un
+`await` faltante en una llamada fire-and-forget no lanza excepción, solo dejar
+de funcionar en silencio.
