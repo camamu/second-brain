@@ -14,7 +14,7 @@ Adaptadores:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 
 from .models import (
     Chunk,
@@ -159,12 +159,16 @@ class NoteWriter(ABC):
         ...
 
     @abstractmethod
-    def update(self, note_id: str, content: str) -> Note:
+    def update(
+        self, note_id: str, content: str, tags: Optional[List[str]] = None
+    ) -> Note:
         """Actualiza el contenido de una nota existente.
 
         Args:
             note_id: Identificador de la nota a actualizar.
-            content: Nuevo contenido markdown (preserva frontmatter).
+            content: Nuevo contenido markdown (preserva el resto del frontmatter).
+            tags: Tags a añadir a los existentes (union, sin eliminarlos).
+                None preserva los tags actuales sin cambios.
 
         Returns:
             La nota con el contenido actualizado.
@@ -300,6 +304,18 @@ class VectorStore(ABC):
 
         Returns:
             Numero de chunks en el vector store.
+        """
+        ...
+
+    @abstractmethod
+    def list_note_ids(self) -> List[str]:
+        """Devuelve los IDs de todas las notas con chunks indexados.
+
+        Recorre todas las colecciones (todas las estrategias) para permitir
+        detectar notas huerfanas (borradas del vault pero aun indexadas).
+
+        Returns:
+            Lista de note_id unicos presentes en el vector store.
         """
         ...
 

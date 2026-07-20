@@ -44,17 +44,19 @@ class ManageNotes:
         logger.info("Nota '%s' creada y reindexada.", note.id)
         return note
 
-    def update(self, note_id: str, content: str) -> Note:
+    def update(self, note_id: str, content: str, tags: list[str] | None = None) -> Note:
         """Actualiza el contenido de una nota y la reindexar.
 
         Args:
             note_id: Identificador de la nota a actualizar.
             content: Nuevo contenido markdown.
+            tags: Tags a añadir a los existentes (union, sin eliminarlos).
+                None preserva los tags actuales sin cambios.
 
         Returns:
             La nota actualizada.
         """
-        note = self._writer.update(note_id, content)
+        note = self._writer.update(note_id, content, tags)
         self._ingest.execute_single(note.id)
         logger.info("Nota '%s' actualizada y reindexada.", note.id)
         return note

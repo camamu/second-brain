@@ -1,0 +1,41 @@
+/* second-brain custom theme — verificado con chainlit==2.11.1
+   Selectores anclados en data-step-type/id reales del bundle compilado.
+   Revisar tras cualquier `pip install -U chainlit`. */
+
+[data-step-type="user_message"] .step {
+  border-radius: 16px 16px 3px 16px;
+}
+
+[data-step-type="assistant_message"] {
+  font-size: 15.5px;
+  line-height: 1.6;
+  animation: sb-fade-in 0.25s ease-out;
+}
+
+[data-step-type="tool"] {
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+#message-composer {
+  border-radius: 18px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--input));
+}
+#chat-submit {
+  border-radius: 9999px;
+}
+
+#side-view-content {
+  animation: sb-slide-in 0.2s ease-out;
+}
+
+@keyframes sb-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes sb-slide-in {
+  from { transform: translateX(12px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

@@ -1,0 +1,59 @@
+{
+  "custom_fonts": [
+    "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+  ],
+  "variables": {
+    "dark": {
+      "--background": "240 14.3% 5.5%",
+      "--foreground": "240 10.0% 96.1%",
+      "--card": "240 8.8% 11.2%",
+      "--card-foreground": "240 10.0% 96.1%",
+      "--popover": "240 8.8% 13.3%",
+      "--popover-foreground": "240 10.0% 96.1%",
+      "--primary": "173.4 80.4% 40.0%",
+      "--primary-foreground": "0 0% 100%",
+      "--secondary": "240 7.3% 16.1%",
+      "--secondary-foreground": "240 10.0% 96.1%",
+      "--muted": "240 8.8% 13.3%",
+      "--muted-foreground": "240 10.0% 68%",
+      "--accent": "173.4 40% 20%",
+      "--accent-foreground": "173.4 80.4% 70%",
+      "--border": "240 8% 18%",
+      "--input": "240 8.0% 9.8%",
+      "--ring": "173.4 80.4% 40.0%",
+      "--sidebar-background": "240 9.5% 8.2%",
+      "--sidebar-foreground": "240 10.0% 96.1%",
+      "--sidebar-primary": "173.4 80.4% 40.0%",
+      "--sidebar-accent": "240 8.8% 13.3%",
+      "--sidebar-border": "240 8% 18%",
+      "--font-sans": "Inter, system-ui, sans-serif",
+      "--radius": "0.75rem"
+    },
+    "light": {
+      "--background": "40 15.8% 96.3%",
+      "--foreground": "240 5.9% 10.0%",
+      "--card": "0 0% 100%",
+      "--card-foreground": "240 5.9% 10.0%",
+      "--popover": "40 11.1% 94.7%",
+      "--popover-foreground": "240 5.9% 10.0%",
+      "--primary": "173.4 80.4% 40.0%",
+      "--primary-foreground": "0 0% 100%",
+      "--secondary": "30 10.5% 92.5%",
+      "--secondary-foreground": "240 5.9% 10.0%",
+      "--muted": "40 11.1% 94.7%",
+      "--muted-foreground": "240 3% 44%",
+      "--accent": "173.4 60% 92%",
+      "--accent-foreground": "173.4 80.4% 25%",
+      "--border": "0 0% 88%",
+      "--input": "0 0% 100%",
+      "--ring": "173.4 80.4% 40.0%",
+      "--sidebar-background": "0 0% 100%",
+      "--sidebar-foreground": "240 5.9% 10.0%",
+      "--sidebar-primary": "173.4 80.4% 40.0%",
+      "--sidebar-accent": "40 11.1% 94.7%",
+      "--sidebar-border": "0 0% 88%",
+      "--font-sans": "Inter, system-ui, sans-serif",
+      "--radius": "0.75rem"
+    }
+  }
+}

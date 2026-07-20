@@ -3,18 +3,22 @@
 import logging
 
 import chainlit as cl
+from chainlit.input_widget import InputWidget, Select
+from langchain.agents import AgentExecutor
 
 from src.agent.agent import create_agent
 from src.application.ingest_vault import IngestVault
 from src.application.manage_notes import ManageNotes
+from src.application.prune_orphans import PruneOrphans
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
+from src.domain.models import ChunkStrategy, SearchResult
 from src.domain.ports import ObsidianRagError
 from src.infrastructure.config import (
     get_chunker,
     get_langchain_llm,
     get_note_loader,
     get_note_writer,
+    get_strategy_from_env,
     get_vector_store,
     is_readonly,
 )
@@ -22,38 +26,136 @@ from src.infrastructure.config import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_RESET_COMMANDS = {"/reset", "/clear", "/borrar historial"}
+_PRUNE_COMMANDS = {"/prune", "/limpiar huerfanos", "/limpiar huérfanos"}
 
-@cl.on_chat_start
-async def on_chat_start() -> None:
-    """Inicializa el agente al abrir una sesión de chat."""
-    actions = [
-        cl.Action(
-            name="fixed",
-            payload={"strategy": "fixed"},
-            label="Chunking por tamaño fijo",
-        ),
-        cl.Action(
-            name="markdown",
-            payload={"strategy": "markdown"},
-            label="Chunking por cabeceras Markdown",
-        ),
-        cl.Action(
-            name="backlink",
-            payload={"strategy": "backlink"},
-            label="Chunking por backlinks",
-        ),
-    ]
-    res = await cl.AskActionMessage(
-        content="¿Qué estrategia de chunking quieres usar?",
-        actions=actions,
-        timeout=30,
+
+def _build_citation_elements(results: list[SearchResult]) -> list[cl.Text]:
+    """Convierte SearchResult reales en elementos de fuente nativos de Chainlit.
+
+    Deduplica por note_id: si varios chunks citados pertenecen a la misma
+    nota, solo se adjunta un elemento por nota.
+    """
+    seen: set[str] = set()
+    elements: list[cl.Text] = []
+    for r in results:
+        if r.note_id in seen:
+            continue
+        seen.add(r.note_id)
+        elements.append(
+            cl.Text(
+                name=r.note_id,
+                content=(
+                    f"**Ruta:** `{r.note_id}`\n\n"
+                    f"**Score:** {r.score:.2f}\n\n---\n\n{r.content}"
+                ),
+                display="side",
+            )
+        )
+    return elements
+
+
+async def _reset_history(agent: AgentExecutor) -> None:
+    """Borra la memoria de conversación del agente y confirma al usuario."""
+    if agent.memory is not None:
+        agent.memory.clear()
+    await cl.Message(
+        content="Historial de conversación borrado. Puedes empezar de nuevo."
     ).send()
 
-    if res is None:
-        strategy = ChunkStrategy.FIXED_SIZE
-    else:
-        strategy = ChunkStrategy(res["payload"]["strategy"])
 
+async def _confirm_and_prune(prune: PruneOrphans) -> None:
+    """Detecta chunks huérfanos, pide confirmación y los borra si se acepta."""
+    orphans = prune.find_orphans()
+    if not orphans:
+        await cl.Message(
+            content="No se encontraron notas huérfanas en el índice."
+        ).send()
+        return
+
+    listing = "\n".join(f"- {note_id}" for note_id in orphans)
+    res = await cl.AskActionMessage(
+        content=(
+            f"Se encontraron {len(orphans)} nota(s) huérfana(s) en el índice "
+            f"(ya no existen en el vault):\n{listing}\n\n¿Confirmas el borrado?"
+        ),
+        actions=[
+            cl.Action(
+                name="confirm", payload={"confirm": True}, label="Confirmar borrado"
+            ),
+            cl.Action(name="cancel", payload={"confirm": False}, label="Cancelar"),
+        ],
+        timeout=60,
+    ).send()
+
+    if res is None or not res["payload"].get("confirm"):
+        await cl.Message(content="Borrado cancelado.").send()
+        return
+
+    deleted = prune.execute(orphans)
+    await cl.Message(
+        content=(
+            f"Eliminados chunks de {len(deleted)} nota(s) huérfana(s): "
+            f"{', '.join(deleted)}"
+        )
+    ).send()
+
+
+@cl.set_starters
+async def set_starters(user: cl.User | None = None) -> list[cl.Starter]:
+    """Sugerencias de prompt mostradas antes del primer mensaje."""
+    return [
+        cl.Starter(
+            label="Resume mis notas de esta semana",
+            message="Resume las notas que he creado o editado esta semana.",
+        ),
+        cl.Starter(
+            label="¿Qué tareas tengo pendientes?",
+            message="¿Qué tareas pendientes tengo apuntadas en mis notas?",
+        ),
+        cl.Starter(
+            label="Busca menciones de un tema",
+            message="Busca menciones de 'arquitectura hexagonal' en mis notas.",
+        ),
+    ]
+
+
+async def _init_agent_session(
+    strategy: ChunkStrategy, *, changed: bool = False
+) -> None:
+    """Construye chunker/store/agente para `strategy` y los guarda en la sesión.
+
+    Reutilizada tanto por `on_chat_start` (arranque) como por
+    `on_settings_update` (cambio de estrategia en caliente). `changed`
+    controla el texto de los mensajes, ya que un cambio en caliente reinicia
+    la memoria de conversación del agente (ver `create_agent`).
+
+    Chainlit solo abandona la pantalla de bienvenida/starters cuando el
+    cliente recibe el evento "first_interaction" (lo que ocurre de forma
+    nativa al enviar un mensaje real o responder a un Ask-prompt). Como aquí
+    no hay ninguna interacción real del usuario en el arranque, se dispara
+    ese mismo evento a mano (`session.has_first_interaction` +
+    `emitter.init_thread(...)`, lo que hace Chainlit internamente tras una
+    primera interacción) para poder mostrar el mensaje de carga directamente
+    en la vista de chat, sin pasar por la pantalla de bienvenida. Es una
+    llamada a un mecanismo interno no documentado como API pública; si una
+    futura versión de Chainlit lo cambia, revisar `chainlit/emitter.py`
+    (`init_thread`) y `chainlit/session.py` (`has_first_interaction`).
+    """
+    if not cl.context.session.has_first_interaction:
+        cl.context.session.has_first_interaction = True
+        await cl.context.emitter.init_thread(interaction="chunking_init")
+
+    loading = cl.Message(
+        content=(
+            f"Cambiando a estrategia **{strategy.label}**..."
+            if changed
+            else f"Cargando estrategia **{strategy.label}**..."
+        )
+    )
+    await loading.send()
+
+    await cl.context.emitter.task_start()
     try:
         chunker = get_chunker(strategy)
         store = get_vector_store(strategy)
@@ -63,20 +165,94 @@ async def on_chat_start() -> None:
         search_uc = SearchNotes(store=store)
         manage_uc = ManageNotes(loader=loader, writer=writer, ingest=ingest_uc)
         llm = get_langchain_llm()
+        readonly = is_readonly()
+        last_search_results: list[SearchResult] = []
         agent = create_agent(
             llm=llm,
             search_use_case=search_uc,
             manage_use_case=manage_uc,
             strategy=strategy,
-            readonly=is_readonly(),
+            readonly=readonly,
+            last_results=last_search_results,
         )
         cl.user_session.set("agent", agent)
-        await cl.Message(
-            content=f"Agente listo con estrategia **{strategy.label}**. ¿En qué puedo ayudarte?"
-        ).send()
+        cl.user_session.set("last_search_results", last_search_results)
+        cl.user_session.set("strategy", strategy)
+        # Limpiar huérfanos borra datos indexados: no disponible en modo solo lectura.
+        cl.user_session.set(
+            "prune_orphans",
+            None if readonly else PruneOrphans(loader=loader, store=store),
+        )
+
+        loading.content = (
+            f"Estrategia actualizada a **{strategy.label}** "
+            "(se reinició el historial de conversación)."
+            if changed
+            else f"Agente listo con estrategia **{strategy.label}**. "
+            "¿En qué puedo ayudarte?"
+        )
+        await loading.update()
     except ObsidianRagError as e:
         logger.error("Error inicializando el agente: %s", e, exc_info=True)
-        await cl.Message(content=f"Error al inicializar el agente: {e}").send()
+        loading.content = f"Error al inicializar el agente: {e}"
+        await loading.update()
+    finally:
+        await cl.context.emitter.task_end()
+
+
+@cl.on_chat_start
+async def on_chat_start() -> None:
+    """Inicializa el agente al abrir una sesión de chat.
+
+    La estrategia de chunking se toma de CHUNKER_STRATEGY (sin bloquear el
+    arranque con una pregunta). Se entra directamente en la vista de chat
+    (se salta la pantalla de bienvenida/starters, ver `_init_agent_session`)
+    mostrando el mensaje de carga; la estrategia puede cambiarse luego desde
+    el panel de Settings (⚙️).
+    """
+    strategy = get_strategy_from_env()
+    await _init_agent_session(strategy)
+
+    settings_widgets: list[InputWidget] = [
+        Select(
+            id="chunk_strategy",
+            label="Estrategia de chunking",
+            items={s.label: s.value for s in ChunkStrategy},
+            initial_value=strategy.value,
+        )
+    ]
+    await cl.ChatSettings(settings_widgets).send()
+
+    await cl.context.emitter.set_commands(
+        [
+            {
+                "id": "reset",
+                "description": "Borra el historial de esta conversación",
+                "icon": "history",
+                "button": False,
+                "persistent": False,
+                "selected": False,
+            },
+            {
+                "id": "prune",
+                "description": (
+                    "Elimina del índice las notas que ya no existen en el vault"
+                ),
+                "icon": "sparkles",
+                "button": False,
+                "persistent": False,
+                "selected": False,
+            },
+        ]
+    )
+
+
+@cl.on_settings_update
+async def on_settings_update(settings: dict) -> None:
+    """Reconstruye el agente si el usuario cambia la estrategia de chunking."""
+    new_strategy = ChunkStrategy(settings["chunk_strategy"])
+    if new_strategy != cl.user_session.get("strategy"):
+        await _init_agent_session(new_strategy, changed=True)
 
 
 @cl.on_message
@@ -89,13 +265,32 @@ async def on_message(message: cl.Message) -> None:
         ).send()
         return
 
+    content = message.content.strip().lower()
+    if message.command == "reset" or content in _RESET_COMMANDS:
+        await _reset_history(agent)
+        return
+
+    if message.command == "prune" or content in _PRUNE_COMMANDS:
+        prune = cl.user_session.get("prune_orphans")
+        if prune is None:
+            await cl.Message(
+                content="Esta acción no está disponible en modo solo lectura."
+            ).send()
+            return
+        await _confirm_and_prune(prune)
+        return
+
     try:
+        last_results = cl.user_session.get("last_search_results")
+        if last_results is not None:
+            last_results.clear()
         cb = cl.AsyncLangchainCallbackHandler()
         response = await agent.ainvoke(
             {"input": message.content},
             config={"callbacks": [cb]},
         )
-        await cl.Message(content=response["output"]).send()
+        elements = _build_citation_elements(last_results) if last_results else []
+        await cl.Message(content=response["output"], elements=elements).send()
     except ObsidianRagError as e:
         logger.error("Error del agente: %s", e, exc_info=True)
         await cl.Message(content=f"Error: {e}").send()

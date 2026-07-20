@@ -11,7 +11,7 @@ from langchain.tools import Tool
 
 from src.application.manage_notes import ManageNotes
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
+from src.domain.models import ChunkStrategy, SearchResult
 from src.domain.ports import NoteNotFoundError, VaultWriteError, VectorStoreError
 
 logger = logging.getLogger(__name__)
@@ -75,12 +75,17 @@ def _unwrap_string_input(raw: str) -> str:
 def create_search_tool(
     search_use_case: SearchNotes,
     strategy: ChunkStrategy,
+    last_results: list[SearchResult] | None = None,
 ) -> Tool:
     """Crea la herramienta search_vault para el agente ReAct.
 
     Args:
         search_use_case: Caso de uso de búsqueda semántica.
         strategy: Estrategia de chunking activa.
+        last_results: lista mutable donde se guardan (sustituyendo el
+            contenido anterior) los SearchResult de la última búsqueda,
+            para que la capa de presentación (Chainlit) pueda adjuntarlos
+            como citas sin cambiar el contrato de retorno de esta tool.
 
     Returns:
         Tool de LangChain que busca en el vault de Obsidian.
@@ -90,6 +95,9 @@ def create_search_tool(
         query = _unwrap_string_input(query)
         try:
             results = search_use_case.execute_text(query, strategy=strategy)
+            if last_results is not None:
+                last_results.clear()
+                last_results.extend(results)
             logger.info("search_vault: query='%s', resultados=%d", query, len(results))
             if not results:
                 return "No se encontraron resultados para la consulta."
@@ -145,7 +153,14 @@ def create_note_tool(manage_use_case: ManageNotes) -> Tool:
         description=(
             "Crea una nueva nota en el vault de Obsidian. "
             "El input debe ser un JSON con campos: "
-            "title (str, requerido), content (str, requerido), tags (lista, opcional)."
+            "title (str, requerido), content (str, requerido), "
+            "tags (lista de strings, opcional). "
+            "IMPORTANTE sobre tags: siempre que el usuario mencione un tema, "
+            "categoría o pida explícitamente tags, inclúyelos en el campo "
+            'JSON \'tags\' (ej. "tags": ["arquitectura", "microservicios"]). '
+            "NUNCA escribas '#tag' dentro de content: los tags fuera del "
+            "campo 'tags' no se guardan en el frontmatter y no son "
+            "recuperables por categoría."
         ),
     )
 
@@ -165,10 +180,11 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
             data = _safe_json_loads(tool_input)
             note_id = data["note_id"]
             content = data["content"]
+            tags = data.get("tags")
         except (json.JSONDecodeError, KeyError):
-            return "Formato incorrecto. Usa JSON con campos: note_id, content"
+            return "Formato incorrecto. Usa JSON con campos: note_id, content, tags (opcional)"
         try:
-            note = manage_use_case.update(note_id, content)
+            note = manage_use_case.update(note_id, content, tags)
             logger.info("edit_note: nota actualizada '%s'", note.id)
             return f"Nota actualizada: {note.id}"
         except NoteNotFoundError:
@@ -189,6 +205,11 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
             "El input debe ser un JSON con campos: "
             "note_id (str, ruta exacta obtenida de search_vault), "
             "content (str, nuevo contenido completo de la nota — "
-            "NO incluyas marcadores de búsqueda como '(nota: X, score: Y)')."
+            "NO incluyas marcadores de búsqueda como '(nota: X, score: Y)'), "
+            "tags (lista de strings, opcional). "
+            "IMPORTANTE sobre tags: si el usuario pide añadir tags a esta "
+            "nota, inclúyelos en el campo JSON 'tags' — se SUMAN a los tags "
+            "que ya tiene la nota, no los reemplazan. "
+            "NUNCA escribas '#tag' dentro de content."
         ),
     )

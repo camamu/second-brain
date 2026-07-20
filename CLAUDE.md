@@ -35,7 +35,7 @@ src/domain/          → entities (frozen dataclasses) + ABC ports — zero exte
 src/application/     → use cases (one class per file, one execute() method)
 src/adapters/        → port implementations: chunkers, embedders, llm, loaders, vector_stores
 src/agent/           → LangChain ReAct agent + tools (search_vault, create_note, edit_note)
-src/app/             → Chainlit entrypoint (imported by app.py at repo root)
+src/app/             → Chainlit entrypoint (imported by app.py at repo root)/
 src/infrastructure/  → config loading (.env), dependency wiring
 ```
 

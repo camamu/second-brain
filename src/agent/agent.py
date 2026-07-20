@@ -15,7 +15,7 @@ from langchain_core.language_models import BaseLanguageModel
 from src.agent.tools import create_edit_tool, create_note_tool, create_search_tool
 from src.application.manage_notes import ManageNotes
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy
+from src.domain.models import ChunkStrategy, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,11 @@ Reglas:
   (3) llama edit_note INMEDIATAMENTE con ese note_id. No vuelvas a buscar.
 - El campo content de edit_note debe contener SOLO el texto limpio de la nota.
   Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
+- TAGS: si el usuario menciona un tema/categoría o pide tags al crear o editar
+  una nota, ponlos SIEMPRE en el campo JSON "tags" de create_note/edit_note
+  (lista de strings), NUNCA como "#tag" dentro de content. Los tags dentro de
+  content no se guardan en el frontmatter y no sirven para categorizar la nota.
+  En edit_note, los tags que pases se SUMAN a los existentes, no los reemplazan.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
 - Si ya tienes la respuesta y no necesitas otra herramienta, NO escribas la
@@ -80,6 +85,7 @@ def create_agent(
     manage_use_case: ManageNotes,
     strategy: ChunkStrategy = ChunkStrategy.FIXED_SIZE,
     readonly: bool = False,
+    last_results: list[SearchResult] | None = None,
 ) -> AgentExecutor:
     """Construye el agente ReAct con las herramientas del vault.
 
@@ -89,11 +95,13 @@ def create_agent(
         manage_use_case: Caso de uso de gestión de notas.
         strategy: Estrategia de chunking para search_vault.
         readonly: Si True, solo incluye search_vault (sin create/edit).
+        last_results: lista mutable reenviada a create_search_tool para
+            capturar los SearchResult de la última búsqueda (ver tools.py).
 
     Returns:
         AgentExecutor listo para recibir preguntas del usuario.
     """
-    search_tool = create_search_tool(search_use_case, strategy)
+    search_tool = create_search_tool(search_use_case, strategy, last_results)
     if readonly:
         tools = [search_tool]
     else:

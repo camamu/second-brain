@@ -81,6 +81,37 @@ class TestSearchTool:
         assert "Error al buscar" in result
         assert "conexión fallida" in result
 
+    def test_search_tool_populates_last_results_with_real_search_results(self):
+        search_uc = MagicMock(spec=SearchNotes)
+        results = [_make_search_result(1), _make_search_result(2)]
+        search_uc.execute_text.return_value = results
+        last_results: list[SearchResult] = []
+        tool = create_search_tool(search_uc, ChunkStrategy.FIXED_SIZE, last_results)
+
+        tool.func("query")
+
+        assert last_results == results
+
+    def test_search_tool_clears_last_results_before_new_search(self):
+        search_uc = MagicMock(spec=SearchNotes)
+        search_uc.execute_text.return_value = [_make_search_result(1)]
+        last_results: list[SearchResult] = [_make_search_result(9)]
+        tool = create_search_tool(search_uc, ChunkStrategy.FIXED_SIZE, last_results)
+
+        tool.func("query")
+
+        assert len(last_results) == 1
+        assert last_results[0].note_id == "notas/nota-1.md"
+
+    def test_search_tool_works_without_last_results_param(self):
+        search_uc = MagicMock(spec=SearchNotes)
+        search_uc.execute_text.return_value = []
+        tool = create_search_tool(search_uc, ChunkStrategy.FIXED_SIZE)
+
+        result = tool.func("query")
+
+        assert "No se encontraron" in result
+
 
 class TestCreateNoteTool:
     def test_create_note_tool_parses_json_and_creates_note(self):
@@ -115,8 +146,28 @@ class TestEditNoteTool:
 
         result = tool.func(payload)
 
+        # Sin tags en el payload, se propaga None (preserva tags actuales)
         manage_uc.update.assert_called_once_with(
-            "notas/existente.md", "Nuevo contenido"
+            "notas/existente.md", "Nuevo contenido", None
+        )
+        assert "notas/existente.md" in result
+
+    def test_edit_note_tool_with_tags_propagates_to_use_case(self):
+        manage_uc = MagicMock(spec=ManageNotes)
+        manage_uc.update.return_value = _make_note("notas/existente.md")
+        tool = create_edit_tool(manage_uc)
+        payload = json.dumps(
+            {
+                "note_id": "notas/existente.md",
+                "content": "Nuevo contenido",
+                "tags": ["nuevo-tag"],
+            }
+        )
+
+        result = tool.func(payload)
+
+        manage_uc.update.assert_called_once_with(
+            "notas/existente.md", "Nuevo contenido", ["nuevo-tag"]
         )
         assert "notas/existente.md" in result
 

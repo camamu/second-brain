@@ -269,6 +269,21 @@ class ChromaVectorStore(VectorStore):
         """
         return sum(c.count() for c in self._existing_collections())
 
+    def list_note_ids(self) -> List[str]:
+        """Devuelve los note_id unicos indexados en cualquier colección.
+
+        Returns:
+            Lista ordenada de note_id sin duplicados.
+        """
+        note_ids: set[str] = set()
+        for collection in self._existing_collections():
+            data = collection.get(include=["metadatas"])  # type: ignore[list-item]
+            note_ids.update(
+                str(meta.get("note_id", "")) for meta in data["metadatas"] or []
+            )
+        note_ids.discard("")
+        return sorted(note_ids)
+
     def clear(self) -> None:
         """Elimina y recrea la colección de la estrategia por defecto.
 
