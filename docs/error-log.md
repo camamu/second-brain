@@ -543,3 +543,408 @@ ejecuta. Y, en general: un `# type: ignore` sobre un error de
 silenciarlo, verificar con una ejecución real (no solo tests), porque un
 `await` faltante en una llamada fire-and-forget no lanza excepción, solo dejar
 de funcionar en silencio.
+
+---
+
+## [2026-07-20] create_note/edit_note escribían en el vault sin confirmación del usuario
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: diseño
+
+### Qué se hizo mal
+
+El agente ReAct podía crear y editar notas en el vault sin pedir ninguna
+confirmación al usuario. La única "protección" existente era una
+instrucción en el prompt del agente (`_REACT_PROMPT_TEMPLATE` en
+`src/agent/agent.py`), que además iba en la dirección contraria: la regla
+"FLUJO OBLIGATORIO PARA EDITAR" instruía explícitamente al LLM a llamar
+`edit_note` **INMEDIATAMENTE** tras una búsqueda, sin ningún paso
+intermedio de confirmación, y no había ninguna regla equivalente para
+`create_note`. Las funciones de las tools (`src/agent/tools.py`) llamaban
+directamente a `ManageNotes.create()`/`.update()` en cuanto recibían el
+Action Input, sin ningún punto de pausa.
+
+### Por qué era un error
+
+Delegar una garantía de comportamiento (nunca escribir sin permiso
+explícito) únicamente a una instrucción de prompt es frágil por
+construcción: depende de que el LLM la respete en cada turno, y los LLMs
+—especialmente los modelos pequeños usados en este proyecto (ver tabla de
+compatibilidad más abajo en este archivo)— no lo garantizan de forma
+consistente. El resultado observado fue exactamente ese: el agente creaba
+notas nuevas sin que el usuario lo hubiera aprobado.
+
+### Cómo se corrigió
+
+Se movió la garantía de la capa de prompt (donde es solo una sugerencia) a
+la capa de código (donde es obligatoria):
+
+1. `create_note_tool`/`create_edit_tool` (`src/agent/tools.py`) pasan a
+   requerir un parámetro `confirm_action: ConfirmCallback` (callback
+   `async` inyectado, sin default inseguro) y se convierten en tools solo
+   async (`func=None`, `coroutine=...`). Antes de escribir, construyen un
+   resumen de la acción propuesta y hacen
+   `approved = await confirm_action(summary)`; si no se aprueba, no se
+   llama a `ManageNotes.create()`/`.update()`.
+2. `create_agent()` (`src/agent/agent.py`) lanza `ValueError` en
+   construcción si `readonly=False` y no se pasa `confirm_action` —
+   imposible desplegar un agente con escritura habilitada y sin mecanismo
+   de confirmación por un olvido.
+3. `src/app/__init__.py` implementa `_confirm_write_action()` reutilizando
+   el mismo patrón de `cl.AskActionMessage` (confirmar/cancelar,
+   `timeout=60`) que ya existía para `/prune` (`_confirm_and_prune`), y lo
+   inyecta en `create_agent(...)`.
+4. Se mantiene `tools.py` libre de dependencias de Chainlit (regla de
+   arquitectura hexagonal): el callback es un `Callable[[str],
+   Awaitable[bool]]` genérico, no una llamada directa a `cl.AskActionMessage`.
+
+### Cómo evitarlo en el futuro
+
+Cuando una acción es irreversible o modifica estado del usuario (crear,
+editar, borrar), no confiar en que el prompt del LLM baste para exigir
+confirmación: la garantía debe imponerse en la capa de código que ejecuta
+la acción (la tool o el caso de uso), de forma que sea estructuralmente
+imposible de saltarse, y no solo una convención que el modelo puede
+ignorar. El precedente correcto ya existía en este mismo proyecto
+(`_confirm_and_prune` para `/prune`) y no se había generalizado a
+`create_note`/`edit_note` cuando se implementaron.
+
+---
+
+## [2026-07-20] El agente ignoraba información nueva aportada tras un "no tengo información"
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: diseño
+
+### Qué se hizo mal
+
+Log de producción (Groq): el usuario preguntó por "Manolo el del Bombo",
+`search_vault` no encontró nada relevante y el agente respondió
+correctamente "no tengo información sobre eso". El usuario respondió
+aportando él mismo un dato ("es hincha de la selección española") — no
+una instrucción para seguir buscando, sino información nueva que el
+agente no tenía. En vez de reconocer la oportunidad de guardarla, el
+agente volvió a llamar `search_vault` dos veces más con variaciones de la
+consulta, sin encontrar nada, y repitió el mismo "no tengo información",
+ignorando por completo el dato que el usuario acababa de darle.
+
+### Por qué era un error
+
+El prompt del agente (`_REACT_PROMPT_TEMPLATE`) solo cubría el flujo de
+"el usuario pide crear/editar explícitamente" (ver entrada anterior), pero
+no contemplaba el caso más común en una conversación real: el usuario
+completa una laguna de conocimiento del vault de forma incidental, sin
+pedir explícitamente que se guarde nada. Sin una regla que reconociera
+este patrón, el agente desperdiciaba turnos repitiendo búsquedas que ya
+sabía que no darían resultado, en vez de ofrecer la acción obviamente útil
+(guardar la información como nota nueva).
+
+### Cómo se corrigió
+
+Se añadió la regla "OFRECER GUARDAR INFORMACIÓN NUEVA" al prompt: si el
+Final Answer anterior fue "no tengo información" sobre un tema y el
+usuario responde con una afirmación (no una instrucción de búsqueda) sobre
+ese mismo tema, el agente no debe volver a llamar `search_vault`; debe
+preguntar en el propio Final Answer si quiere que lo guarde como nota, y
+solo llamar a `create_note` (que ya exige confirmación de escritura desde
+la entrada anterior de este log) cuando el usuario confirme en un turno
+posterior. Es, por naturaleza, una regla de prompt — a diferencia de la
+garantía de "nunca escribir sin confirmar" (que se impuso en código), aquí
+no hay forma de codificar de forma fiable "esto es información nueva y no
+una instrucción de búsqueda": es un juicio semántico que depende del LLM.
+
+### Cómo evitarlo en el futuro
+
+Al diseñar reglas de prompt para un agente conversacional con memoria,
+pensar en los turnos siguientes al caso feliz/triste inmediato: un "no
+encontré nada" no es un callejón sin salida conversacional, es el punto de
+partida más probable para que el usuario aporte la información que
+faltaba. Diseñar explícitamente ese segundo turno, no solo el primero.
+
+---
+
+## [2026-07-20] Panel lateral de referencias se abría solo, y luego dejó de aparecer
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: diseño / UI
+
+### Qué se hizo mal
+
+`_build_citation_elements` (`src/app/__init__.py`) adjuntaba los
+resultados de `search_vault` como `cl.Text(..., display="side")` a cada
+respuesta del agente. El supuesto de diseño (documentado en
+`implementation-plan.md`) era que el panel lateral de Chainlit solo se
+abre cuando el usuario hace click en una referencia mencionada en el
+chat — pero esa verificación visual en navegador quedó pendiente y nunca
+se completó. En producción, el panel se abría automáticamente en cuanto
+llegaba cualquier respuesta con resultados de búsqueda, sin interacción
+del usuario.
+
+Al corregirlo cambiando `display="side"` por `display="page"` (para que
+el click navegase a una página dedicada en vez de abrir un panel), el
+síntoma cambió mal: dejaron de aparecer chips de referencia clicables
+por completo.
+
+### Por qué era un error
+
+Ambos supuestos se basaban en la documentación superficial de Chainlit,
+no en el comportamiento real del frontend. Leyendo el bundle JS
+instalado (`chainlit==2.11.1`, `.venv/.../chainlit/frontend/dist/`) se
+confirmó que hay dos mecanismos independientes:
+
+1. Un `useEffect` que filtra **todos** los elementos adjuntos al hilo
+   con `display==="side"` y abre el panel lateral automáticamente en
+   cuanto la lista cambia — sin importar el texto del mensaje ni ningún
+   click. De ahí el primer bug.
+2. Para cualquier `display` que no sea `"inline"` (incluido `"page"`),
+   el chip clicable **solo se renderiza si el `name` del elemento
+   aparece literalmente como substring dentro del `content` del
+   mensaje** (la función que arma el contenido hace un
+   `content.replaceAll(regex_de_los_names, ...)`). El `content` de la
+   respuesta es texto libre generado por el LLM, que casi nunca
+   reproduce el `note_id` exacto (ruta de archivo) — de ahí el segundo
+   bug: el elemento queda adjunto pero invisible.
+
+En ambos casos, confiar en la documentación o en la analogía ("`side`
+abre panel, `page` abre página, ambos con el mismo mecanismo de
+disparo") sin leer el bundle real llevó a una hipótesis incorrecta.
+
+### Cómo se corrigió
+
+1. Cambiar `display="side"` → `display="page"` en
+   `_build_citation_elements` (evita la auto-apertura, punto 1).
+2. Añadir `_build_sources_footer()` en `src/app/__init__.py`, que
+   construye de forma **determinista** (no dependiente del LLM) un pie
+   de mensaje con los `note_id` exactos de las fuentes citadas, y se
+   concatena siempre a `response["output"]` antes de enviar el
+   `cl.Message`. Esto garantiza la coincidencia textual que Chainlit
+   exige para renderizar el chip (punto 2), sin depender de que el
+   prompt del LLM cite la ruta exacta de la nota.
+3. Se extrajo `_dedup_note_ids()` como función pura compartida entre
+   `_build_citation_elements` y `_build_sources_footer`, lo que además
+   la hizo testeable sin necesitar un contexto real de Chainlit
+   (`cl.Text` no se puede instanciar fuera de una sesión activa —
+   lanza `ChainlitContextException`).
+
+### Cómo evitarlo en el futuro
+
+Para cualquier comportamiento de Chainlit que dependa de cómo el
+frontend interpreta los `elements` adjuntos a un mensaje (paneles,
+chips, auto-apertura), no asumir el comportamiento a partir del nombre
+del parámetro (`display="side"` vs `"page"`) ni de la documentación de
+alto nivel: leer el bundle JS instalado en `.venv` cuando el
+comportamiento observado no cuadre con lo esperado, como ya se hizo
+aquí. Y, como en la entrada anterior sobre confirmación de escritura:
+si una garantía de UI depende de que el LLM reproduzca un dato exacto
+(aquí, el `note_id`) en texto libre, no confiar en el prompt —
+construir ese dato de forma determinista en código.
+
+---
+
+## [2026-07-20] El agente seguía inventando contenido e ignorando sus propias preguntas de seguimiento
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: diseño
+
+### Qué se hizo mal
+
+Log de producción (Groq): tras la regla "OFRECER GUARDAR INFORMACIÓN
+NUEVA" (entrada anterior de este log), el agente sí preguntaba
+correctamente "¿quieres que guarde esto como nota nueva?" cuando no
+encontraba información. Pero cuando el usuario respondía solo "sí"
+(confirmando la acción sin aportar el contenido real), el agente
+llamaba a `create_note` con contenido inventado por él mismo
+(`"El usuario proporcionará la información sobre cómo cocinar un
+huevo"`, y en el turno siguiente `"Para cocinar un huevo, se
+necesitan..."`), en vez de preguntar cuál era el contenido real.
+Además, cuando el propio agente preguntó "¿quieres agregar tags como
+'recetas' o 'cocina'?" y el usuario respondió con la palabra "recetas",
+el turno siguiente del agente ignoró por completo esa respuesta y
+disparó una nueva búsqueda `search_vault` con "recetas" como si fuera
+una pregunta nueva sobre el vault, en vez de interpretarla como el tag
+a añadir con `edit_note`.
+
+### Por qué era un error
+
+La regla "OFRECER GUARDAR INFORMACIÓN NUEVA" ya existente asumía
+implícitamente que, en el turno de confirmación, el usuario "aporta él
+mismo información nueva y sustancial" — pero no cubría el caso, más
+común en la práctica, de que el usuario solo confirme ("sí") sin dar
+contenido. Ante ese vacío de instrucción, el LLM rellenaba el campo
+`content` con texto plausible pero inventado, y ese contenido pasaba
+sin fricción por el único guardarraíl real del sistema
+(`_confirm_write_action`, ver entrada de confirmación de escritura),
+que solo pregunta "¿confirmas esta acción?" sobre el contenido que el
+LLM ya decidió — no valida si ese contenido es real.
+
+Por separado, el prompt tampoco tenía ninguna regla de continuidad
+conversacional: nada le decía al LLM que debía correlacionar la
+respuesta corta del usuario con la pregunta de seguimiento que él mismo
+acababa de formular. La regla genérica "Usa search_vault ANTES de
+responder preguntas sobre el contenido del vault" ganaba por defecto
+ante la ausencia de una regla más específica, y el LLM trataba "recetas"
+como una nueva consulta.
+
+Se confirmó además, investigando `ObsidianLoader.update()`
+(`src/adapters/obsidian_loader.py`), que el manejo de tags al editar
+**no tenía ningún bug**: la unión `existing.tags + tags` con
+`tags=[]` preserva los tags existentes. El síntoma observado era
+puramente de prompt (el agente nunca llegó a intentar añadir el tag),
+no de pérdida de datos en el adaptador.
+
+### Cómo se corrigió
+
+Se añadieron dos reglas nuevas a `_REACT_PROMPT_TEMPLATE`
+(`src/agent/agent.py`), en el mismo estilo que las reglas existentes:
+
+1. **NUNCA INVENTES CONTENIDO**: prohíbe explícitamente generar
+   contenido de relleno en `create_note`/`edit_note`; si no se tiene el
+   texto real, instruye a preguntarlo explícitamente en el `Final
+   Answer` y esperar la respuesta antes de llamar a la tool.
+2. **CONTINUIDAD DE PREGUNTAS PROPIAS**: instruye a interpretar el
+   siguiente mensaje del usuario como respuesta a la pregunta de
+   seguimiento del turno anterior (revisando `chat_history`) antes de
+   decidir si hace falta otra herramienta, con el ejemplo explícito de
+   tags → `edit_note`, no `search_vault`.
+
+Se añadieron tests de regresión en `tests/unit/test_agent.py`
+(`test_react_prompt_forbids_placeholder_content`,
+`test_react_prompt_includes_follow_up_continuity_rule`) que verifican
+la presencia de ambas reglas en el prompt, siguiendo el patrón ya
+usado por `test_react_prompt_includes_offer_to_save_new_information_rule`.
+
+### Cómo evitarlo en el futuro
+
+Como ya señala la entrada anterior de este log: al añadir una regla de
+prompt para cubrir un escenario conversacional, pensar explícitamente
+en los casos degenerados de ese mismo escenario (aquí: "el usuario
+confirma sin dar contenido" era el caso degenerado de "el usuario
+aporta información nueva", y no se cubrió la primera vez). Y, en
+general, cualquier regla de "pregúntale al usuario X" necesita una
+regla hermana de "cuando el usuario responda, trátalo como respuesta a
+X" — sin esta segunda mitad, el prompt sabe preguntar pero no sabe
+escuchar.
+
+---
+
+## [2026-07-21] El mecanismo para saltar la pantalla de bienvenida no era el correcto
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: diseño
+
+### Qué se hizo mal
+
+La iteración 5 de `implementation-plan.md` (arranque directo en la vista
+de chat) añadió en `_init_agent_session` (`src/app/__init__.py`) un hack
+que fijaba `cl.context.session.has_first_interaction = True` y llamaba a
+`cl.context.emitter.init_thread(interaction="chunking_init")`, basándose
+en la lectura de `chainlit/socket.py`/`chainlit/emitter.py`: la pantalla
+de bienvenida se oculta cuando el cliente recibe el evento de socket
+`"first_interaction"`, así que se decidió disparar ese mismo evento a
+mano. El usuario probó en el navegador y siguió viendo el flash de la
+pantalla de bienvenida antes de pasar al chat.
+
+### Por qué era un error
+
+Investigar el bundle JS compilado del frontend (no solo el backend) reveló
+que la premisa era incorrecta: el componente que renderiza
+`#welcome-screen` decide mostrarse u ocultarse según `Nie(messages)` —
+si la lista de `messages` de la sesión está vacía o no — y **no** según el
+evento `first_interaction`. Ese evento solo sirve para otra cosa (nombrar
+el thread vía `data_layer.update_thread`, que este proyecto ni siquiera
+configura, por lo que `flush_thread_queues` es un no-op salvo por el
+`emit`). El hack no solo no cumplía su propósito: añadía un `await` de red
+completo (`init_thread`) antes de enviar el primer `cl.Message` de carga,
+alargando exactamente el flash que pretendía evitar.
+
+La lección de fondo: `chainlit/emitter.py` y `chainlit/socket.py`
+(backend) explican *cuándo* se emite un evento, pero no *qué hace* ese
+evento en el cliente. Verificar solo el lado del servidor llevó a una
+solución que "debería funcionar" según la lectura del backend pero que no
+tenía ningún efecto observable en el frontend real.
+
+### Cómo se corrigió
+
+Se eliminó el bloque `has_first_interaction`/`init_thread` de
+`_init_agent_session`. El mensaje de carga (`cl.Message(...).send()`)
+vuelve a ser la primera acción de la función, sin ningún paso previo que
+retrase su llegada — dado que Chainlit oculta la bienvenida en cuanto
+llega el primer mensaje real, minimizar la latencia hasta ese envío es la
+única palanca real disponible. Se corrigió también el docstring de la
+función para describir el mecanismo verificado (`Nie(messages)`) en vez
+del incorrecto.
+
+### Cómo evitarlo en el futuro
+
+Cuando una hipótesis sobre comportamiento de UI se basa en leer solo el
+código Python del backend de un framework con frontend compilado
+(Chainlit, y en general cualquier SPA), verificar también el bundle JS
+servido realmente antes de implementar — el backend puede emitir eventos
+cuyo efecto en el cliente es distinto (o nulo) al que su nombre sugiere.
+Cuando el usuario reporta que un fix "no funcionó" tras una verificación
+manual, no reforzar el mismo mecanismo: cuestionar la hipótesis de
+partida y volver a leer el código real, tal como se hizo aquí.
+
+---
+
+## [2026-07-21] Notas creadas/editadas por el agente solo se indexaban en la estrategia activa
+
+**Fase**: fase-6-chainlit.md
+**Categoría**: arquitectura
+
+### Qué se hizo mal
+
+El usuario reportó: crear una nota con la estrategia de chunking `fixed`
+activa y luego cambiar a `markdown` o `backlink` desde el panel de
+Settings hacía que la búsqueda no encontrara esa nota, como si no
+existiera.
+
+### Por qué era un error
+
+`ChromaVectorStore` mantiene una colección por estrategia (diseño
+intencional para comparar Precision@K/MRR). `_init_agent_session`
+(`src/app/__init__.py`) construye, para la estrategia activa, un único
+`chunker` y un único `IngestVault(loader, chunker, store)`, inyectado en
+`ManageNotes`. `ManageNotes.create()`/`update()` llaman
+`ingest.execute_single(note.id)`, que chunkeaba la nota con ese único
+chunker y llamaba `store.add_chunks(chunks)`. Como cada chunker marca sus
+chunks con su propio `Chunk.strategy` fijo por clase, y
+`ChromaVectorStore.add_chunks()` enruta cada chunk a la colección de su
+`strategy`, la nota solo terminaba indexada en la colección de la
+estrategia activa en el momento de crearla — nunca en las otras dos. El
+diseño de "una colección por estrategia" es correcto para la ingesta
+masiva del vault (`scripts/ingest.py --strategy X`, pensada para producir
+resultados de evaluación aislados y comparables), pero no tenía sentido
+aplicado a la escritura interactiva desde el chat: el usuario no está
+"evaluando una estrategia" al crear una nota, espera poder usarla después
+sin importar cuál esté activa.
+
+### Cómo se corrigió
+
+`IngestVault` ganó un parámetro opcional `all_chunkers: list[BaseChunker]
+| None`, usado únicamente por `execute_single()`: hace un solo
+`delete_by_note()` (ya opera sobre todas las colecciones) y luego un
+`chunk_many()` + `add_chunks()` por cada chunker de la lista, sumando el
+total de chunks. `execute()` (la ingesta masiva del CLI) no cambia — sigue
+usando un único `chunker`. `_init_agent_session` construye
+`all_chunkers = [get_chunker(s) for s in ChunkStrategy]` y lo pasa al
+`IngestVault` de `ManageNotes`.
+
+Se descartó llamar `execute_single()` tres veces (una por estrategia, con
+un `IngestVault` distinto cada vez) porque cada llamada habría borrado la
+nota de **todas** las colecciones antes de reindexar solo en la suya — la
+segunda y tercera llamada habrían borrado lo que la anterior acababa de
+indexar, sobreviviendo solo la última estrategia procesada. Se documentó
+como test de regresión explícito
+(`test_ingest_vault_execute_single_deletes_note_only_once_with_multiple_chunkers`).
+
+### Cómo evitarlo en el futuro
+
+Cuando un mismo caso de uso (`IngestVault`) sirve a dos flujos con
+requisitos distintos — ingesta masiva por estrategia para evaluación
+comparativa, y escritura interactiva que debe funcionar sin importar la
+estrategia activa — no asumir que ambos deben compartir exactamente la
+misma configuración (un chunker). Preguntar explícitamente "¿este
+componente se usa igual en los dos flujos, o uno de ellos tiene una
+necesidad distinta que el diseño actual no contempla?" antes de dar por
+buena una única estrategia activa como suficiente para todo.

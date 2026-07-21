@@ -26,6 +26,14 @@ def _make_note(note_id: str = "notas/nueva.md") -> MagicMock:
     return note
 
 
+async def _approve(_summary: str) -> bool:
+    return True
+
+
+async def _reject(_summary: str) -> bool:
+    return False
+
+
 class TestSearchTool:
     def test_search_tool_calls_search_use_case_with_query(self):
         search_uc = MagicMock(spec=SearchNotes)
@@ -114,37 +122,65 @@ class TestSearchTool:
 
 
 class TestCreateNoteTool:
-    def test_create_note_tool_parses_json_and_creates_note(self):
+    async def test_create_note_tool_parses_json_and_creates_note(self):
         manage_uc = MagicMock(spec=ManageNotes)
         manage_uc.create.return_value = _make_note("notas/nueva.md")
-        tool = create_note_tool(manage_uc)
+        tool = create_note_tool(manage_uc, _approve)
         payload = json.dumps({"title": "Mi nota", "content": "Contenido"})
 
-        result = tool.func(payload)
+        result = await tool.coroutine(payload)
 
         manage_uc.create.assert_called_once_with("Mi nota", "Contenido", [])
         assert "notas/nueva.md" in result
 
-    def test_create_note_tool_returns_error_on_invalid_json(self):
+    async def test_create_note_tool_returns_error_on_invalid_json(self):
         manage_uc = MagicMock(spec=ManageNotes)
-        tool = create_note_tool(manage_uc)
+        tool = create_note_tool(manage_uc, _approve)
 
-        result = tool.func("esto no es json")
+        result = await tool.coroutine("esto no es json")
 
         assert "Formato incorrecto" in result
         manage_uc.create.assert_not_called()
 
+    async def test_create_note_tool_skips_write_when_confirmation_rejected(self):
+        manage_uc = MagicMock(spec=ManageNotes)
+        tool = create_note_tool(manage_uc, _reject)
+        payload = json.dumps({"title": "Mi nota", "content": "Contenido"})
+
+        result = await tool.coroutine(payload)
+
+        manage_uc.create.assert_not_called()
+        assert "canceló" in result
+
+    async def test_create_note_tool_asks_confirmation_with_note_summary(self):
+        manage_uc = MagicMock(spec=ManageNotes)
+        manage_uc.create.return_value = _make_note("notas/nueva.md")
+        seen_summaries: list[str] = []
+
+        async def _capture(summary: str) -> bool:
+            seen_summaries.append(summary)
+            return True
+
+        tool = create_note_tool(manage_uc, _capture)
+        payload = json.dumps({"title": "Mi nota", "content": "Contenido de prueba"})
+
+        await tool.coroutine(payload)
+
+        assert len(seen_summaries) == 1
+        assert "Mi nota" in seen_summaries[0]
+        assert "Contenido de prueba" in seen_summaries[0]
+
 
 class TestEditNoteTool:
-    def test_edit_note_tool_parses_json_and_updates_note(self):
+    async def test_edit_note_tool_parses_json_and_updates_note(self):
         manage_uc = MagicMock(spec=ManageNotes)
         manage_uc.update.return_value = _make_note("notas/existente.md")
-        tool = create_edit_tool(manage_uc)
+        tool = create_edit_tool(manage_uc, _approve)
         payload = json.dumps(
             {"note_id": "notas/existente.md", "content": "Nuevo contenido"}
         )
 
-        result = tool.func(payload)
+        result = await tool.coroutine(payload)
 
         # Sin tags en el payload, se propaga None (preserva tags actuales)
         manage_uc.update.assert_called_once_with(
@@ -152,10 +188,10 @@ class TestEditNoteTool:
         )
         assert "notas/existente.md" in result
 
-    def test_edit_note_tool_with_tags_propagates_to_use_case(self):
+    async def test_edit_note_tool_with_tags_propagates_to_use_case(self):
         manage_uc = MagicMock(spec=ManageNotes)
         manage_uc.update.return_value = _make_note("notas/existente.md")
-        tool = create_edit_tool(manage_uc)
+        tool = create_edit_tool(manage_uc, _approve)
         payload = json.dumps(
             {
                 "note_id": "notas/existente.md",
@@ -164,20 +200,32 @@ class TestEditNoteTool:
             }
         )
 
-        result = tool.func(payload)
+        result = await tool.coroutine(payload)
 
         manage_uc.update.assert_called_once_with(
             "notas/existente.md", "Nuevo contenido", ["nuevo-tag"]
         )
         assert "notas/existente.md" in result
 
-    def test_edit_note_tool_returns_error_when_note_not_found(self):
+    async def test_edit_note_tool_returns_error_when_note_not_found(self):
         manage_uc = MagicMock(spec=ManageNotes)
         manage_uc.update.side_effect = NoteNotFoundError("nota no existe")
-        tool = create_edit_tool(manage_uc)
+        tool = create_edit_tool(manage_uc, _approve)
         payload = json.dumps({"note_id": "notas/fantasma.md", "content": "contenido"})
 
-        result = tool.func(payload)
+        result = await tool.coroutine(payload)
 
         assert "no existe" in result
         assert "search_vault" in result
+
+    async def test_edit_note_tool_skips_write_when_confirmation_rejected(self):
+        manage_uc = MagicMock(spec=ManageNotes)
+        tool = create_edit_tool(manage_uc, _reject)
+        payload = json.dumps(
+            {"note_id": "notas/existente.md", "content": "Nuevo contenido"}
+        )
+
+        result = await tool.coroutine(payload)
+
+        manage_uc.update.assert_not_called()
+        assert "canceló" in result

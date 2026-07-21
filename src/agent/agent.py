@@ -12,7 +12,12 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 
-from src.agent.tools import create_edit_tool, create_note_tool, create_search_tool
+from src.agent.tools import (
+    ConfirmCallback,
+    create_edit_tool,
+    create_note_tool,
+    create_search_tool,
+)
 from src.application.manage_notes import ManageNotes
 from src.application.search_notes import SearchNotes
 from src.domain.models import ChunkStrategy, SearchResult
@@ -37,11 +42,68 @@ Reglas:
   (3) llama edit_note INMEDIATAMENTE con ese note_id. No vuelvas a buscar.
 - El campo content de edit_note debe contener SOLO el texto limpio de la nota.
   Nunca incluyas marcadores de búsqueda como "(nota: X, score: Y)" en el content.
+- OFRECER GUARDAR INFORMACIÓN NUEVA: si tu Final Answer anterior fue que no
+  tienes información sobre un tema (search_vault no encontró nada relevante,
+  aunque haya devuelto resultados de otros temas), y el usuario responde
+  aportando él mismo información nueva y sustancial sobre ese mismo tema
+  (una afirmación, no una instrucción para seguir buscando o reformular la
+  consulta), NO llames a search_vault otra vez para ese tema: ya
+  comprobaste que no está en el vault. En vez de eso, pasa directo a
+  "Thought: Tengo la respuesta final." y en el Final Answer pregunta
+  explícitamente si quiere que guardes esa información como una nota
+  nueva. NO llames a create_note en este turno; espera la confirmación del
+  usuario. Si en un turno posterior el usuario confirma, entonces sí llama
+  a create_note, con un título derivado del tema y el content basado en la
+  información que compartió (revisa el historial de conversación); si
+  declina, reconócelo y no crees nada.
+- NUNCA INVENTES CONTENIDO: nunca generes contenido de relleno
+  (placeholder) para el campo content de create_note o edit_note —
+  frases como "el usuario proporcionará..." o texto genérico inventado
+  por ti están PROHIBIDAS. Si no tienes el texto real y completo que
+  el usuario quiere guardar, aunque ya haya confirmado que quiere
+  crear o editar la nota, NO llames a la tool todavía: pasa directo a
+  "Thought: Tengo la respuesta final." y en el Final Answer pregunta
+  explícitamente cuál es ese contenido. Espera la respuesta del
+  usuario con el contenido real antes de llamar a create_note/edit_note.
+- CONFIRMACIÓN AL EJECUTAR: create_note y edit_note ya muestran
+  automáticamente un diálogo de confirmación al usuario antes de escribir
+  nada. Cuando el usuario te ha pedido explícitamente crear o editar una
+  nota (o cuando ya confirmó tras el ofrecimiento de la regla OFRECER
+  GUARDAR INFORMACIÓN NUEVA), llama directamente a la tool sin volver a
+  pedir permiso en texto — la aplicación ya se encarga de confirmar. La
+  única vez que debes preguntar en el texto de tu respuesta antes de
+  llamar a create_note es el escenario de OFRECER GUARDAR INFORMACIÓN
+  NUEVA, donde eres tú quien detecta la oportunidad sin que el usuario lo
+  haya pedido. Si la Observation indica que el usuario canceló la creación
+  o edición, NO reintentes la misma acción: pasa directo a "Thought: Tengo
+  la respuesta final." y responde con Final Answer reconociendo la
+  cancelación.
 - TAGS: si el usuario menciona un tema/categoría o pide tags al crear o editar
   una nota, ponlos SIEMPRE en el campo JSON "tags" de create_note/edit_note
   (lista de strings), NUNCA como "#tag" dentro de content. Los tags dentro de
   content no se guardan en el frontmatter y no sirven para categorizar la nota.
   En edit_note, los tags que pases se SUMAN a los existentes, no los reemplazan.
+- ENLAZAR NOTAS: cuando el usuario pida enlazar, relacionar o vincular una
+  nota con otra, escribe el enlace en el content de create_note/edit_note
+  con la sintaxis wikilink de Obsidian de DOBLE corchete:
+  [[note_id_exacto]] — el mismo note_id exacto (ruta sin extensión) que
+  usas para note_id en edit_note, no el título en lenguaje natural.
+  NUNCA uses corchete simple ni markdown estándar para esto.
+  Correcto: Relacionado con [[01-inbox/cocción-de-huevos]]
+  Incorrecto: Relacionado con [cocción de huevos]
+  Un corchete simple no crea un enlace real: ObsidianLoader solo
+  reconoce [[...]] para construir los backlinks de una nota, usados por
+  la estrategia de chunking backlink.
+- CONTINUIDAD DE PREGUNTAS PROPIAS: si tu Final Answer anterior formuló
+  una pregunta de seguimiento al usuario (sobre contenido, tags,
+  guardar, confirmar, etc.), interpreta el siguiente mensaje del
+  usuario como la respuesta a esa pregunta pendiente — revisa el
+  historial de conversación — antes de decidir si necesitas usar
+  alguna otra herramienta. Por ejemplo, si preguntaste "¿quieres
+  agregar tags?" y el usuario responde con una o pocas palabras (p.
+  ej. "recetas"), trátalas como los tags a añadir y llama a edit_note
+  con esos tags sobre la nota relevante; NO lo trates como una nueva
+  consulta de search_vault.
 - Responde en el idioma del usuario.
 - Sé conciso y cita la nota fuente cuando sea relevante.
 - Si ya tienes la respuesta y no necesitas otra herramienta, NO escribas la
@@ -86,6 +148,7 @@ def create_agent(
     strategy: ChunkStrategy = ChunkStrategy.FIXED_SIZE,
     readonly: bool = False,
     last_results: list[SearchResult] | None = None,
+    confirm_action: ConfirmCallback | None = None,
 ) -> AgentExecutor:
     """Construye el agente ReAct con las herramientas del vault.
 
@@ -97,18 +160,31 @@ def create_agent(
         readonly: Si True, solo incluye search_vault (sin create/edit).
         last_results: lista mutable reenviada a create_search_tool para
             capturar los SearchResult de la última búsqueda (ver tools.py).
+        confirm_action: Callback que pide confirmación al usuario antes de
+            crear o editar una nota (ver `src.agent.tools.ConfirmCallback`).
+            Obligatorio cuando `readonly=False`, ya que create_note/edit_note
+            no deben poder escribir sin confirmación.
 
     Returns:
         AgentExecutor listo para recibir preguntas del usuario.
+
+    Raises:
+        ValueError: si `readonly=False` y no se proporciona `confirm_action`.
     """
     search_tool = create_search_tool(search_use_case, strategy, last_results)
     if readonly:
         tools = [search_tool]
     else:
+        if confirm_action is None:
+            raise ValueError(
+                "confirm_action es obligatorio cuando readonly=False: "
+                "create_note/edit_note no deben ejecutarse sin confirmación "
+                "del usuario."
+            )
         tools = [
             search_tool,
-            create_note_tool(manage_use_case),
-            create_edit_tool(manage_use_case),
+            create_note_tool(manage_use_case, confirm_action),
+            create_edit_tool(manage_use_case, confirm_action),
         ]
 
     memory = ConversationBufferWindowMemory(

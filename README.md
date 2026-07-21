@@ -7,6 +7,11 @@ sdk: docker
 app_port: 8000
 ---
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/lockup_dark.svg">
+  <img src="public/lockup_light.svg" alt="second-brain">
+</picture>
+
 # Obsidian RAG Agent
 
 Agente conversacional RAG sobre un vault de Obsidian. TFM del Máster en Desarrollo de IA.
