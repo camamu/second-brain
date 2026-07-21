@@ -830,3 +830,220 @@ futura versión de Chainlit cambia este comportamiento.
       toda la funcionalidad (mecanismo interno no documentado), así que
       conviene confirmarla explícitamente antes de dar la tarea por
       cerrada.
+
+## Iteración 6: corrección del hallazgo de la iteración 5 — el hack no hacía lo que se pensaba
+
+El usuario reportó que el flash de la pantalla de bienvenida seguía siendo
+confuso. Investigando el bundle JS compilado con más profundidad (la
+función `Nie(messages)` que decide si renderizar `#welcome-screen`) se
+confirmó que la iteración 5 partía de una premisa incorrecta: la pantalla
+de bienvenida se oculta cuando la lista de `messages` de la sesión deja de
+estar vacía (`Nie` comprueba si hay algún step `user_message`/
+`assistant_message`/`tool`), **no** por el evento de socket
+`"first_interaction"`. Ese evento solo se usa para otra cosa (nombrar el
+thread vía `data_layer.update_thread`, no configurado en este proyecto).
+
+Peor: el `await cl.context.emitter.init_thread(...)` añadido en la
+iteración 5 introducía una espera de red completa **antes** de enviar el
+mensaje de carga, alargando exactamente el flash que se quería evitar.
+
+**Cambio**: eliminado por completo el bloque
+`has_first_interaction`/`init_thread` de `_init_agent_session`; el mensaje
+de carga (`cl.Message(...).send()`) vuelve a ser la primera acción de la
+función, sin pasos previos. Docstring corregido para explicar el mecanismo
+real (`Nie(messages)`), no el incorrecto.
+
+### TODOs iteración 6
+- [x] Quitar `has_first_interaction`/`init_thread` de `_init_agent_session`.
+- [x] Corregir el docstring de `_init_agent_session`.
+- [x] `ruff check`/`format`, `pytest tests/unit/` (145 passed) en verde.
+- [ ] Verificación visual en navegador de que el flash ya no se percibe —
+      pendiente de confirmación del usuario.
+
+---
+
+# Plan de Implementación — Reindexar notas creadas/editadas por el agente en todas las estrategias de chunking
+
+## Contexto
+
+El usuario reporta: si crea o edita una nota desde el chat mientras la
+estrategia activa es `fixed`, y luego cambia de estrategia (p. ej. a
+`markdown` o `backlink` desde el panel de Settings ⚙️), la búsqueda ya no
+encuentra esa nota — como si no existiera. Debería poder usar notas creadas
+bajo cualquier estrategia sin importar cuál esté activa en ese momento.
+
+### Causa raíz (confirmada leyendo el código, no solo hipótesis)
+
+`ChromaVectorStore` mantiene **una colección por estrategia**
+(`src/adapters/vector_stores/chroma_store.py:39-46`), diseño intencional
+para poder comparar Precision@K/MRR entre estrategias (`scripts/ingest.py
+--strategy X` puebla cada colección de forma aislada y controlada).
+
+El problema está en el flujo de escritura interactiva, no en el vector
+store:
+
+- `_init_agent_session` (`src/app/__init__.py`) construye, para la
+  estrategia activa, UN `chunker` y UN `IngestVault(loader, chunker, store)`,
+  y ese mismo `ingest_uc` se inyecta en `ManageNotes`.
+- `ManageNotes.create()`/`update()` (`src/application/manage_notes.py:42-43,59-60`)
+  llaman `self._ingest.execute_single(note.id)`.
+- `IngestVault.execute_single()` (`src/application/ingest_vault.py:55-76`)
+  chunkea la nota con **ese único chunker** y llama `store.add_chunks(chunks)`.
+- Cada chunker marca sus chunks con su propio `Chunk.strategy` (fijo por
+  clase: `FixedSizeChunker` → `FIXED_SIZE`, etc. — ver
+  `src/adapters/chunkers/*.py`), y `ChromaVectorStore.add_chunks()` agrupa y
+  enruta por `chunk.strategy` hacia la colección correspondiente
+  (`chroma_store.py:105-148`). Es decir: **la nota solo se indexa en la
+  colección de la estrategia que estaba activa en el momento de crearla.**
+  Al cambiar de estrategia, la nueva colección nunca recibió esos chunks.
+
+Dato clave que hace la solución simple: `ChromaVectorStore.delete_by_note()`,
+`count()` y `list_note_ids()` **ya operan sobre todas las colecciones**
+(`_existing_collections()`, `chroma_store.py:80-90`) — solo `add_chunks()`
+depende de qué chunker(s) se le pase. El propio store no necesita cambios.
+
+## Análisis previo: dónde reindexar en todas las estrategias
+
+**Aspecto crítico**: cómo hacer que una nota creada/editada quede indexada
+en las 3 colecciones sin romper el aislamiento del ingest bulk por
+estrategia (`scripts/ingest.py --strategy X`, que debe seguir escribiendo
+solo en una colección) y sin duplicar borrados que se pisen entre sí.
+
+**Opciones consideradas**:
+1. Llamar `IngestVault.execute_single()` tres veces (una por estrategia,
+   con un `IngestVault` distinto cada vez) desde `ManageNotes`. Descartado:
+   cada llamada hace `delete_by_note()` primero, que borra la nota de
+   **todas** las colecciones (no solo la suya) — la segunda y tercera
+   llamada borrarían lo que la anterior acababa de indexar. Solo
+   sobreviviría la última estrategia procesada.
+2. Extender `IngestVault` con un parámetro opcional
+   `all_chunkers: list[BaseChunker] | None`, usado únicamente por
+   `execute_single()`: hace **un solo** `delete_by_note()` y luego un
+   `chunk_many()` + `add_chunks()` por cada chunker de la lista.
+   `execute()` (el bulk/CLI) no cambia — sigue usando `self._chunker` en
+   solitario.
+
+**Decisión**: Opción 2. Reutiliza el código existente de
+`execute_single()` (que ya hace bien el orden delete→add), es un cambio de
+una función, y mantiene `execute()`/`scripts/ingest.py` completamente
+intactos porque `all_chunkers` no se les pasa (permanece `None`).
+
+**Riesgo aceptado**: reindexar con 3 chunkers en cada `create`/`edit` es
+~3x más lento que antes (uno de ellos, `BacklinkAwareChunker`, recarga el
+vault vía su propio `NoteLoader` interno). Aceptable: es una operación
+puntual por escritura, no en el camino de búsqueda, y el usuario ya espera
+una confirmación (`AskActionMessage`) antes de que ocurra.
+
+## Mapa de cambios
+
+| Fichero | Acción | Qué cambia |
+|---|---|---|
+| `src/application/ingest_vault.py` | Modificar | Constructor gana `all_chunkers: list[BaseChunker] \| None = None`; `execute_single()` reindexa con todos los chunkers de la lista (un solo `delete_by_note`), fallback a `[self._chunker]` |
+| `src/app/__init__.py` | Modificar | `_init_agent_session` construye `all_chunkers = [get_chunker(s) for s in ChunkStrategy]` y lo pasa al `IngestVault` de `ManageNotes` |
+| `tests/unit/test_ingest_vault.py` | Modificar | 3 tests nuevos en la sección `execute_single()` |
+
+## Tests
+
+- `test_ingest_vault_execute_single_uses_all_chunkers_when_provided` —
+  con `all_chunkers=[chunker_a, chunker_b]`, `chunk_many` se llama en
+  ambos y `store.add_chunks` se llama una vez por chunker.
+- `test_ingest_vault_execute_single_deletes_note_only_once_with_multiple_chunkers` —
+  con varios `all_chunkers`, `delete_by_note` se llama exactamente una
+  vez (regresión directa de la Opción 1 descartada).
+- `test_ingest_vault_execute_single_sums_chunk_count_across_chunkers` —
+  el `int` devuelto es la suma de chunks de todos los chunkers.
+- Los 2 tests existentes de `execute_single` no se tocan (sin
+  `all_chunkers`, cae al fallback `[self._chunker]`).
+
+## Orden de ejecución con gates
+
+1. Modificar `IngestVault` (constructor + `execute_single`) + los 3 tests
+   nuevos → `pytest tests/unit/test_ingest_vault.py -q`.
+2. Modificar `_init_agent_session` en `src/app/__init__.py`.
+3. `ruff check src/ tests/ && ruff format --check src/ tests/`
+4. `mypy src`
+5. `pytest tests/unit/ -q` (suite completa)
+6. Prueba manual con `chainlit run app.py`: crear una nota con `fixed`
+   activo, cambiar a `markdown` desde Settings, preguntar por ella.
+
+## Criterio de completado
+
+- Los 3 tests nuevos en verde junto con toda la suite existente.
+- `ruff`, `ruff format --check` y `mypy` sin errores.
+- Verificación manual confirma que una nota creada bajo una estrategia es
+  encontrada tras cambiar a cualquier otra estrategia.
+
+## Nota operativa (migración de notas ya creadas antes de este fix)
+
+Las notas creadas/editadas **antes** de este fix siguen faltando en las
+colecciones que no eran la estrategia activa en su momento. Un
+`python scripts/ingest.py --strategy markdown` y `--strategy backlink`
+(re-ingesta completa) las pondrá al día una sola vez; no se automatiza en
+código por ser un caso puntual de migración, no un flujo recurrente.
+
+## TODOs por funcionalidad
+
+### 🧩 Aplicación (`IngestVault`)
+- [x] Añadir parámetro `all_chunkers` al constructor de `IngestVault`.
+- [x] Modificar `execute_single()` para reindexar con todos los chunkers
+      de `all_chunkers` (fallback a `[self._chunker]`), con un solo
+      `delete_by_note()`.
+- [x] Actualizar docstrings de la clase y del método.
+
+### 🔌 Wiring (`src/app/__init__.py`)
+- [x] Construir `all_chunkers = [get_chunker(s) for s in ChunkStrategy]`
+      en `_init_agent_session` y pasarlo al `IngestVault` de `ManageNotes`.
+
+### 🧪 Tests
+- [x] `test_ingest_vault_execute_single_uses_all_chunkers_when_provided`
+- [x] `test_ingest_vault_execute_single_deletes_note_only_once_with_multiple_chunkers`
+- [x] `test_ingest_vault_execute_single_sums_chunk_count_across_chunkers`
+- [x] Confirmar que los tests existentes de `execute_single` siguen en
+      verde sin modificarlos.
+
+### ✅ Verificación final
+- [x] `ruff check src/ tests/ && ruff format --check src/ tests/`
+- [x] `mypy src`
+- [x] `pytest tests/unit/ -q` (148 passed)
+- [ ] Prueba manual end-to-end descrita arriba.
+- [x] Documentar en `docs/error-log.md` (bug de arquitectura: escritura
+      interactiva solo indexaba la estrategia activa).
+
+---
+
+# Plan de Implementación — Enlazar notas con sintaxis wikilink `[[...]]`, no `[...]`
+
+## Contexto
+
+El usuario reporta: al pedirle al agente que enlace dos notas, escribe
+corchete simple `[nota]` en vez del wikilink de Obsidian `[[nota]]`.
+`ObsidianLoader._BACKLINK_RE` (`src/adapters/obsidian_loader.py:20`) solo
+reconoce `\[\[([^\]|]+)(?:\|[^\]]+)?\]\]` — con corchete simple la nota
+nunca aparece en `Note.backlinks`, así que el enlace es invisible tanto
+para el grafo del vault como para `BacklinkAwareChunker` (una de las 3
+estrategias de chunking del TFM). No había ninguna regla en el prompt
+ReAct sobre qué sintaxis usar para enlazar notas.
+
+## Cambio
+
+Regla nueva `ENLAZAR NOTAS` en `_REACT_PROMPT_TEMPLATE`
+(`src/agent/agent.py`), junto a la regla `TAGS` existente, mismo estilo
+(mayúsculas, ejemplo Correcto/Incorrecto): exige `[[note_id_exacto]]`
+(el mismo note_id de ruta exacta que ya usa `edit_note`, no el título en
+lenguaje natural) y prohíbe corchete simple/markdown estándar para esto.
+
+## TODOs
+
+### 🧩 Prompt (`src/agent/agent.py`)
+- [x] Añadir regla `ENLAZAR NOTAS` a `_REACT_PROMPT_TEMPLATE`.
+
+### 🧪 Tests
+- [x] `test_react_prompt_requires_double_bracket_wikilinks_for_note_links`
+      en `tests/unit/test_agent.py`.
+
+### ✅ Verificación final
+- [x] `ruff check`/`format`, `mypy src`, `pytest tests/unit/` (149 passed)
+      en verde.
+- [ ] Verificación manual: pedir al agente enlazar dos notas y confirmar
+      en el `.md` resultante que usa `[[note_id]]` — pendiente de
+      confirmación del usuario (regla de prompt, no determinística).

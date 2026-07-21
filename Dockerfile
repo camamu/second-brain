@@ -22,6 +22,7 @@ COPY scripts/ scripts/
 COPY app.py .
 COPY chainlit.md .
 COPY .chainlit/ .chainlit/
+COPY public/ public/
 COPY vault/ vault/
 COPY pyproject.toml .
 
