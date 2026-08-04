@@ -6,6 +6,7 @@ y devuelve un Tool de LangChain listo para usar en el agente.
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 
 from langchain.tools import Tool
 
@@ -15,6 +16,20 @@ from src.domain.models import ChunkStrategy, SearchResult
 from src.domain.ports import NoteNotFoundError, VaultWriteError, VectorStoreError
 
 logger = logging.getLogger(__name__)
+
+_CONTENT_PREVIEW_LIMIT = 800
+
+ConfirmCallback = Callable[[str], Awaitable[bool]]
+"""Callback inyectado que muestra al usuario un resumen de una escritura
+propuesta (crear/editar nota) y devuelve True si la aprueba, False si la
+cancela. Mantiene `tools.py` independiente del framework de UI (Chainlit)."""
+
+
+def _truncate(content: str) -> str:
+    """Recorta contenido largo para no saturar el diálogo de confirmación."""
+    if len(content) <= _CONTENT_PREVIEW_LIMIT:
+        return content
+    return content[:_CONTENT_PREVIEW_LIMIT] + "\n[...contenido truncado...]"
 
 
 def _safe_json_loads(s: str) -> dict:
@@ -121,17 +136,22 @@ def create_search_tool(
     )
 
 
-def create_note_tool(manage_use_case: ManageNotes) -> Tool:
+def create_note_tool(
+    manage_use_case: ManageNotes, confirm_action: ConfirmCallback
+) -> Tool:
     """Crea la herramienta create_note para el agente ReAct.
 
     Args:
         manage_use_case: Caso de uso de gestión de notas.
+        confirm_action: Callback que pide confirmación al usuario antes de
+            escribir la nota. Obligatorio: crear notas sin pedir permiso es
+            precisamente el comportamiento que esta tool debe evitar.
 
     Returns:
-        Tool de LangChain que crea notas nuevas en el vault.
+        Tool de LangChain (solo async) que crea notas nuevas en el vault.
     """
 
-    def _create(tool_input: str) -> str:
+    async def _create(tool_input: str) -> str:
         try:
             data = _safe_json_loads(tool_input)
             title = data["title"]
@@ -139,6 +159,17 @@ def create_note_tool(manage_use_case: ManageNotes) -> Tool:
             tags = data.get("tags", [])
         except (json.JSONDecodeError, KeyError):
             return "Formato incorrecto. Usa JSON con campos: title, content, tags (opcional)"
+
+        summary = (
+            f"Crear nota nueva:\n\n"
+            f"**Título:** {title}\n"
+            f"**Tags:** {', '.join(tags) if tags else '(ninguno)'}\n\n"
+            f"**Contenido:**\n{_truncate(content)}"
+        )
+        if not await confirm_action(summary):
+            logger.info("create_note: creación cancelada por el usuario ('%s')", title)
+            return "El usuario canceló la creación de la nota."
+
         try:
             note = manage_use_case.create(title, content, tags)
             logger.info("create_note: nota creada '%s'", note.id)
@@ -149,7 +180,8 @@ def create_note_tool(manage_use_case: ManageNotes) -> Tool:
 
     return Tool(
         name="create_note",
-        func=_create,
+        func=None,
+        coroutine=_create,
         description=(
             "Crea una nueva nota en el vault de Obsidian. "
             "El input debe ser un JSON con campos: "
@@ -165,17 +197,22 @@ def create_note_tool(manage_use_case: ManageNotes) -> Tool:
     )
 
 
-def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
+def create_edit_tool(
+    manage_use_case: ManageNotes, confirm_action: ConfirmCallback
+) -> Tool:
     """Crea la herramienta edit_note para el agente ReAct.
 
     Args:
         manage_use_case: Caso de uso de gestión de notas.
+        confirm_action: Callback que pide confirmación al usuario antes de
+            escribir la edición. Obligatorio: editar notas sin pedir permiso
+            es precisamente el comportamiento que esta tool debe evitar.
 
     Returns:
-        Tool de LangChain que edita notas existentes en el vault.
+        Tool de LangChain (solo async) que edita notas existentes en el vault.
     """
 
-    def _edit(tool_input: str) -> str:
+    async def _edit(tool_input: str) -> str:
         try:
             data = _safe_json_loads(tool_input)
             note_id = data["note_id"]
@@ -183,6 +220,17 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
             tags = data.get("tags")
         except (json.JSONDecodeError, KeyError):
             return "Formato incorrecto. Usa JSON con campos: note_id, content, tags (opcional)"
+
+        summary = (
+            f"Editar nota existente:\n\n"
+            f"**Nota:** {note_id}\n"
+            f"**Tags a añadir:** {', '.join(tags) if tags else '(ninguno)'}\n\n"
+            f"**Nuevo contenido:**\n{_truncate(content)}"
+        )
+        if not await confirm_action(summary):
+            logger.info("edit_note: edición cancelada por el usuario ('%s')", note_id)
+            return "El usuario canceló la edición de la nota."
+
         try:
             note = manage_use_case.update(note_id, content, tags)
             logger.info("edit_note: nota actualizada '%s'", note.id)
@@ -195,7 +243,8 @@ def create_edit_tool(manage_use_case: ManageNotes) -> Tool:
 
     return Tool(
         name="edit_note",
-        func=_edit,
+        func=None,
+        coroutine=_edit,
         description=(
             "Edita el contenido de una nota existente en el vault de Obsidian. "
             "IMPORTANTE: note_id debe ser el identificador exacto que aparece como "

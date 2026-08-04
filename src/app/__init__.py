@@ -30,18 +30,27 @@ _RESET_COMMANDS = {"/reset", "/clear", "/borrar historial"}
 _PRUNE_COMMANDS = {"/prune", "/limpiar huerfanos", "/limpiar huérfanos"}
 
 
+def _dedup_note_ids(results: list[SearchResult]) -> list[str]:
+    """Devuelve los note_id únicos de los resultados, en orden de aparición."""
+    seen: set[str] = set()
+    ids: list[str] = []
+    for r in results:
+        if r.note_id not in seen:
+            seen.add(r.note_id)
+            ids.append(r.note_id)
+    return ids
+
+
 def _build_citation_elements(results: list[SearchResult]) -> list[cl.Text]:
     """Convierte SearchResult reales en elementos de fuente nativos de Chainlit.
 
     Deduplica por note_id: si varios chunks citados pertenecen a la misma
     nota, solo se adjunta un elemento por nota.
     """
-    seen: set[str] = set()
+    by_note_id = {r.note_id: r for r in results}
     elements: list[cl.Text] = []
-    for r in results:
-        if r.note_id in seen:
-            continue
-        seen.add(r.note_id)
+    for note_id in _dedup_note_ids(results):
+        r = by_note_id[note_id]
         elements.append(
             cl.Text(
                 name=r.note_id,
@@ -49,10 +58,25 @@ def _build_citation_elements(results: list[SearchResult]) -> list[cl.Text]:
                     f"**Ruta:** `{r.note_id}`\n\n"
                     f"**Score:** {r.score:.2f}\n\n---\n\n{r.content}"
                 ),
-                display="side",
+                display="page",
             )
         )
     return elements
+
+
+def _build_sources_footer(results: list[SearchResult]) -> str:
+    """Genera un pie de mensaje con los note_id exactos de las fuentes.
+
+    Chainlit solo renderiza un elemento con display="page" como chip
+    clicable si su `name` (el note_id) aparece literalmente en el
+    contenido del mensaje; el texto libre generado por el LLM casi nunca
+    lo incluye, así que este pie garantiza esa coincidencia de forma
+    determinista.
+    """
+    note_ids = _dedup_note_ids(results)
+    if not note_ids:
+        return ""
+    return "\n\n**Fuentes:** " + " ".join(note_ids)
 
 
 async def _reset_history(agent: AgentExecutor) -> None:
@@ -62,6 +86,25 @@ async def _reset_history(agent: AgentExecutor) -> None:
     await cl.Message(
         content="Historial de conversación borrado. Puedes empezar de nuevo."
     ).send()
+
+
+async def _confirm_write_action(summary: str) -> bool:
+    """Pide confirmación al usuario antes de que el agente cree o edite una nota.
+
+    Inyectada en `create_agent` como `confirm_action`; la llaman las tools
+    create_note/edit_note (`src/agent/tools.py`) antes de escribir en el
+    vault. Mismo patrón que `_confirm_and_prune`.
+    """
+    res = await cl.AskActionMessage(
+        content=f"{summary}\n\n¿Confirmas esta acción?",
+        actions=[
+            cl.Action(name="confirm", payload={"confirm": True}, label="Confirmar"),
+            cl.Action(name="cancel", payload={"confirm": False}, label="Cancelar"),
+        ],
+        timeout=60,
+    ).send()
+
+    return res is not None and bool(res["payload"].get("confirm"))
 
 
 async def _confirm_and_prune(prune: PruneOrphans) -> None:
@@ -130,22 +173,12 @@ async def _init_agent_session(
     controla el texto de los mensajes, ya que un cambio en caliente reinicia
     la memoria de conversación del agente (ver `create_agent`).
 
-    Chainlit solo abandona la pantalla de bienvenida/starters cuando el
-    cliente recibe el evento "first_interaction" (lo que ocurre de forma
-    nativa al enviar un mensaje real o responder a un Ask-prompt). Como aquí
-    no hay ninguna interacción real del usuario en el arranque, se dispara
-    ese mismo evento a mano (`session.has_first_interaction` +
-    `emitter.init_thread(...)`, lo que hace Chainlit internamente tras una
-    primera interacción) para poder mostrar el mensaje de carga directamente
-    en la vista de chat, sin pasar por la pantalla de bienvenida. Es una
-    llamada a un mecanismo interno no documentado como API pública; si una
-    futura versión de Chainlit lo cambia, revisar `chainlit/emitter.py`
-    (`init_thread`) y `chainlit/session.py` (`has_first_interaction`).
+    Chainlit oculta la pantalla de bienvenida/starters en cuanto la sesión
+    recibe su primer mensaje real (lista de mensajes no vacía en el
+    frontend); no depende de ningún evento especial. Por eso el mensaje de
+    carga se envía como primera acción de esta función, sin pasos previos
+    que retrasen su llegada.
     """
-    if not cl.context.session.has_first_interaction:
-        cl.context.session.has_first_interaction = True
-        await cl.context.emitter.init_thread(interaction="chunking_init")
-
     loading = cl.Message(
         content=(
             f"Cambiando a estrategia **{strategy.label}**..."
@@ -161,7 +194,12 @@ async def _init_agent_session(
         store = get_vector_store(strategy)
         loader = get_note_loader()
         writer = get_note_writer()
-        ingest_uc = IngestVault(loader=loader, chunker=chunker, store=store)
+        # all_chunkers: las notas creadas/editadas desde el chat deben quedar
+        # disponibles sin importar qué estrategia esté activa después.
+        all_chunkers = [get_chunker(s) for s in ChunkStrategy]
+        ingest_uc = IngestVault(
+            loader=loader, chunker=chunker, store=store, all_chunkers=all_chunkers
+        )
         search_uc = SearchNotes(store=store)
         manage_uc = ManageNotes(loader=loader, writer=writer, ingest=ingest_uc)
         llm = get_langchain_llm()
@@ -174,6 +212,7 @@ async def _init_agent_session(
             strategy=strategy,
             readonly=readonly,
             last_results=last_search_results,
+            confirm_action=None if readonly else _confirm_write_action,
         )
         cl.user_session.set("agent", agent)
         cl.user_session.set("last_search_results", last_search_results)
@@ -290,7 +329,8 @@ async def on_message(message: cl.Message) -> None:
             config={"callbacks": [cb]},
         )
         elements = _build_citation_elements(last_results) if last_results else []
-        await cl.Message(content=response["output"], elements=elements).send()
+        content = response["output"] + _build_sources_footer(last_results or [])
+        await cl.Message(content=content, elements=elements).send()
     except ObsidianRagError as e:
         logger.error("Error del agente: %s", e, exc_info=True)
         await cl.Message(content=f"Error: {e}").send()

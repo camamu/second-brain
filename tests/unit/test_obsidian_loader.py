@@ -176,6 +176,30 @@ def test_obsidian_loader_create_existing_file_raises_write_error(tmp_vault):
         loader.create(title="Duplicada", content="Segunda vez.", tags=[])
 
 
+def test_obsidian_loader_create_writes_delimiters_at_file_start(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act
+    loader.create(title="Delimitadores", content="Cuerpo.", tags=["test"])
+    # Assert — el fichero empieza en la primera línea absoluta con "---"
+    raw = (tmp_vault / "00-inbox" / "delimitadores.md").read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    assert lines[0] == "---"
+    assert "---" in lines[1:]
+
+
+def test_obsidian_loader_create_serializes_tags_as_yaml_list(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act
+    loader.create(title="Tags lista", content="Cuerpo.", tags=["alpha", "beta"])
+    # Assert — tags serializados como lista YAML, nunca como string
+    raw = (tmp_vault / "00-inbox" / "tags-lista.md").read_text(encoding="utf-8")
+    assert "tags:" in raw
+    assert "- alpha" in raw
+    assert "- beta" in raw
+
+
 # ---------------------------------------------------------------------------
 # update
 # ---------------------------------------------------------------------------

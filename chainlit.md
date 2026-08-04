@@ -1,4 +1,4 @@
-# 🧠 second-brain
+![second-brain](/public/lockup_dark.svg)
 
 Bienvenido a tu asistente conversacional para Obsidian.
 
