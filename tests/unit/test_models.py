@@ -6,6 +6,7 @@ from src.domain.models import (
     Chunk,
     ChunkStrategy,
     EvaluationResult,
+    ImportConflictPolicy,
     Note,
     SearchResult,
 )
@@ -109,3 +110,9 @@ def test_chunk_strategy_values_match_env_strings():
     assert ChunkStrategy.FIXED_SIZE.value == "fixed"
     assert ChunkStrategy.MARKDOWN_HEADER.value == "markdown"
     assert ChunkStrategy.BACKLINK_AWARE.value == "backlink"
+
+
+def test_import_conflict_policy_values():
+    assert ImportConflictPolicy.FAIL.value == "fail"
+    assert ImportConflictPolicy.OVERWRITE.value == "overwrite"
+    assert ImportConflictPolicy.COPY.value == "copy"

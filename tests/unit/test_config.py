@@ -130,3 +130,42 @@ def test_require_raises_config_error_when_var_missing(
     # Act / Assert
     with pytest.raises(ConfigError, match="VAULT_PATH"):
         config_module.get_note_loader()
+
+
+def test_get_max_import_size_mb_default_returns_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.delenv("MAX_IMPORT_SIZE_MB", raising=False)
+
+    # Act
+    size = config_module.get_max_import_size_mb()
+
+    # Assert
+    assert size == 1
+
+
+def test_get_max_import_size_mb_reads_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("MAX_IMPORT_SIZE_MB", "5")
+
+    # Act
+    size = config_module.get_max_import_size_mb()
+
+    # Assert
+    assert size == 5
+
+
+def test_get_max_import_size_mb_invalid_value_returns_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("MAX_IMPORT_SIZE_MB", "no-es-un-numero")
+
+    # Act
+    size = config_module.get_max_import_size_mb()
+
+    # Assert
+    assert size == 1

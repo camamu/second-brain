@@ -948,3 +948,54 @@ misma configuración (un chunker). Preguntar explícitamente "¿este
 componente se usa igual en los dos flujos, o uno de ellos tiene una
 necesidad distinta que el diseño actual no contempla?" antes de dar por
 buena una única estrategia activa como suficiente para todo.
+
+## [2026-08-04] Verificación manual de subida de ficheros no automatizable con las herramientas de navegador disponibles
+
+**Fase**: feature-import-md-files.md
+**Categoría**: proceso / herramientas
+
+### Qué se hizo mal
+
+No fue un error de código: al llegar al paso de verificación manual
+("subir un `.md` desde `chainlit run app.py` y confirmar que se importa"),
+se intentó automatizar la interacción real del selector de fichero nativo
+del sistema operativo usando el Browser embebido de la sesión.
+
+### Por qué era un error
+
+`<input type="file">` no permite asignar `.value` por JavaScript por
+motivos de seguridad del navegador (`InvalidStateError`), así que
+`form_input` sobre el botón de adjuntar falla siempre. La alternativa —
+Claude en Chrome, que sí expone `file_upload` vía CDP — no estaba
+conectada en este entorno (`tabs_context_mcp` devolvió "extensión no
+conectada"). Ningún selector de fichero nativo es accesible por el árbol
+de accesibilidad del DOM, así que no hay forma de completarlo con las
+herramientas de automatización de navegador de esta sesión.
+
+### Cómo se corrigió
+
+Se sustituyó la interacción de UI por una llamada directa, vía script
+Python, a las mismas factories de composición (`get_note_loader`,
+`get_note_writer`, `get_vector_store`, `get_chunker`) y al mismo caso de
+uso (`ManageNotes.import_markdown`) que invoca `_handle_md_import` en
+`src/app/__init__.py`. Esto ejercita el camino de producción real
+(adaptador + aplicación + infraestructura) contra el vault y ChromaDB
+reales configurados en `.env`, sin pasar por el socket de Chainlit. Se
+verificó: creación de la nota con `aliases`/`type`/campo custom
+preservados, indexación en las 3 estrategias, búsqueda funcional, y
+detección + resolución de conflicto de `note_id` (política `COPY`). El
+vault real se limpió después (fichero(s) de prueba y chunks indexados
+borrados) para no dejar datos de test en el segundo cerebro del usuario.
+
+### Cómo evitarlo en el futuro
+
+Cuando la verificación manual de una fase implica adjuntar ficheros desde
+un `<input type="file">` real, no asumir que las herramientas de Browser
+del entorno pueden completarlo — comprobar primero si Claude en Chrome
+está conectado (`tabs_context_mcp`) antes de intentar `form_input` sobre
+un input de fichero, que fallará siempre. Si ninguna de las dos vías está
+disponible, el sustituto válido es invocar el mismo caso de uso de
+aplicación con las mismas factories de `src/infrastructure/config.py` que
+usa la app real, dejando explícito en el checklist que la verificación
+cubrió el camino de producción pero no la interacción literal del picker
+de fichero del navegador.

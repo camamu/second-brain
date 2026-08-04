@@ -3,7 +3,7 @@
 import pytest
 
 from src.adapters.obsidian_loader import ObsidianLoader
-from src.domain.models import NoteType
+from src.domain.models import ImportConflictPolicy, NoteType
 from src.domain.ports import NoteNotFoundError, VaultWriteError
 
 # ---------------------------------------------------------------------------
@@ -244,3 +244,91 @@ def test_obsidian_loader_update_nonexistent_raises_not_found(tmp_vault):
     # Act / Assert
     with pytest.raises(NoteNotFoundError):
         loader.update("no-existe", "contenido")
+
+
+# ---------------------------------------------------------------------------
+# create_raw
+# ---------------------------------------------------------------------------
+
+
+def test_create_raw_preserves_original_frontmatter_fields(tmp_vault):
+    # Arrange — aliases, type y un campo custom que create() no soporta
+    raw = (
+        "---\n"
+        "title: Importada\n"
+        "tags:\n"
+        "  - ia\n"
+        "aliases:\n"
+        "  - Alias Uno\n"
+        "type: doc\n"
+        "custom_field: valor-custom\n"
+        "---\n"
+        "Cuerpo de la nota importada.\n"
+    )
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act
+    note = loader.create_raw("Importada.md", raw)
+    # Assert — todos los campos sobreviven, no solo title/content/tags
+    assert note.frontmatter["aliases"] == ["Alias Uno"]
+    assert note.frontmatter["custom_field"] == "valor-custom"
+    assert note.note_type == NoteType.DOC
+
+
+def test_create_raw_derives_note_id_from_filename_slug(tmp_vault):
+    # Arrange
+    raw = "---\ntags: []\n---\nContenido.\n"
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act — el título del frontmatter difiere del nombre de fichero
+    note = loader.create_raw("Mi Fichero Original.md", raw)
+    # Assert — el note_id sale del slug del filename, no del title
+    assert note.id == "00-inbox/mi-fichero-original"
+
+
+def test_create_raw_normalizes_invalid_tags(tmp_vault):
+    # Arrange
+    raw = '---\ntags: ["Foo Bar", "123"]\n---\nContenido.\n'
+    loader = ObsidianLoader(str(tmp_vault))
+    # Act — "Foo Bar" se normaliza, "123" se descarta por ser numérico puro
+    note = loader.create_raw("con-tags.md", raw)
+    # Assert
+    assert note.tags == ["foo-bar"]
+
+
+def test_create_raw_raises_when_path_exists_and_policy_is_fail(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    loader.create_raw("duplicada.md", "---\ntags: []\n---\nPrimera.\n")
+    # Act / Assert — FAIL es la política por defecto
+    with pytest.raises(VaultWriteError):
+        loader.create_raw("duplicada.md", "---\ntags: []\n---\nSegunda.\n")
+
+
+def test_create_raw_overwrites_when_policy_is_overwrite(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    loader.create_raw("duplicada.md", "---\ntags: []\n---\nPrimera.\n")
+    # Act
+    note = loader.create_raw(
+        "duplicada.md",
+        "---\ntags: []\n---\nSegunda.\n",
+        policy=ImportConflictPolicy.OVERWRITE,
+    )
+    # Assert — mismo note_id, contenido reemplazado
+    assert note.id == "00-inbox/duplicada"
+    assert note.content == "Segunda."
+
+
+def test_create_raw_adds_numeric_suffix_when_policy_is_copy(tmp_vault):
+    # Arrange
+    loader = ObsidianLoader(str(tmp_vault))
+    loader.create_raw("duplicada.md", "---\ntags: []\n---\nPrimera.\n")
+    # Act
+    note = loader.create_raw(
+        "duplicada.md",
+        "---\ntags: []\n---\nSegunda.\n",
+        policy=ImportConflictPolicy.COPY,
+    )
+    # Assert — el original se conserva, la copia recibe el sufijo -1
+    assert note.id == "00-inbox/duplicada-1"
+    original = loader.load_by_id("00-inbox/duplicada")
+    assert original.content == "Primera."

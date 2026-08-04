@@ -11,7 +11,7 @@ from typing import List
 
 import frontmatter
 
-from src.domain.models import Note, NoteType
+from src.domain.models import ImportConflictPolicy, Note, NoteType
 from src.domain.obsidian_conventions import sanitize_filename
 from src.domain.ports import NoteLoader, NoteNotFoundError, NoteWriter, VaultWriteError
 from src.domain.tags import normalize_tags
@@ -152,9 +152,74 @@ class ObsidianLoader(NoteLoader, NoteWriter):
         path.write_text(frontmatter.dumps(post), encoding="utf-8")
         return self._parse(path)
 
+    def create_raw(
+        self,
+        filename: str,
+        raw_content: str,
+        policy: ImportConflictPolicy = ImportConflictPolicy.FAIL,
+    ) -> Note:
+        """Escribe un documento .md preservando su frontmatter original.
+
+        Args:
+            filename: Nombre de fichero original; el note_id se deriva
+                de su slug (misma función que usa `create`).
+            raw_content: Contenido completo del documento, incluido su
+                frontmatter YAML si lo tiene.
+            policy: Qué hacer si el note_id resultante ya existe.
+
+        Returns:
+            La nota recién escrita.
+
+        Raises:
+            VaultWriteError: Si ya existe un fichero con ese slug y
+                policy es FAIL.
+        """
+        inbox = self._vault / "00-inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+
+        slug = sanitize_filename(Path(filename).stem)
+        path = inbox / f"{slug}.md"
+
+        if path.exists():
+            if policy == ImportConflictPolicy.FAIL:
+                raise VaultWriteError(f"Ya existe una nota en '{path}'")
+            if policy == ImportConflictPolicy.COPY:
+                path = self._next_copy_path(inbox, slug)
+
+        path.write_text(self._normalize_raw_tags(raw_content), encoding="utf-8")
+        return self._parse(path)
+
     # ------------------------------------------------------------------
     # Privado
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _next_copy_path(inbox: Path, slug: str) -> Path:
+        """Encuentra el primer nombre libre `<slug>-N.md` en `inbox`."""
+        n = 1
+        while True:
+            candidate = inbox / f"{slug}-{n}.md"
+            if not candidate.exists():
+                return candidate
+            n += 1
+
+    @staticmethod
+    def _normalize_raw_tags(raw_content: str) -> str:
+        """Normaliza los tags del frontmatter sin tocar el resto del documento.
+
+        Si los tags ya están normalizados (o no hay tags), devuelve
+        `raw_content` sin modificar para preservar el documento original
+        byte a byte.
+        """
+        post = frontmatter.loads(raw_content)
+        fm = dict(post.metadata)
+        tags_raw = fm.get("tags", [])
+        raw_list = list(tags_raw) if isinstance(tags_raw, list) else [str(tags_raw)]
+        normalized = normalize_tags(raw_list)
+        if normalized == raw_list:
+            return raw_content
+        post["tags"] = normalized
+        return frontmatter.dumps(post)
 
     def _parse(self, path: Path) -> Note:
         """Parsea un fichero .md y devuelve una Note del dominio.
