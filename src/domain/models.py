@@ -79,6 +79,21 @@ class NoteType(Enum):
         return self._label
 
 
+class ImportConflictPolicy(Enum):
+    """Politica de resolucion cuando un import de .md colisiona con un note_id existente.
+
+    Attributes:
+        FAIL: aborta la escritura y propaga VaultWriteError (comportamiento
+            por defecto, nunca sobrescribe en silencio).
+        OVERWRITE: reemplaza el fichero existente.
+        COPY: escribe con un sufijo numerico libre (-1, -2, ...).
+    """
+
+    FAIL = "fail"
+    OVERWRITE = "overwrite"
+    COPY = "copy"
+
+
 # =================== ENTIDADES ===================
 
 

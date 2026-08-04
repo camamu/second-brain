@@ -39,9 +39,9 @@ src/app/             → Chainlit entrypoint (imported by app.py at repo root)/
 src/infrastructure/  → config loading (.env), dependency wiring
 ```
 
-**Domain entities** (`src/domain/models.py`): `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, plus enums `ChunkStrategy` and `NoteType`. All are `@dataclass(frozen=True)`.
+**Domain entities** (`src/domain/models.py`): `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, plus enums `ChunkStrategy`, `NoteType` and `ImportConflictPolicy` (`FAIL`/`OVERWRITE`/`COPY`, used by `NoteWriter.create_raw` when importing a `.md` whose note_id already exists). All are `@dataclass(frozen=True)`.
 
-**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter`, `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + exceptions `ObsidianRagError`, `NoteNotFoundError`, `ChunkingError`, `EmbeddingError`, `VectorStoreError`, `VaultWriteError`, `ConfigError`.
+**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter` (`create`/`update`/`create_raw` — `create_raw` preserves the original frontmatter of an imported `.md` instead of reconstructing it), `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + exceptions `ObsidianRagError`, `NoteNotFoundError`, `ChunkingError`, `EmbeddingError`, `VectorStoreError`, `VaultWriteError`, `ConfigError`.
 
 **Implemented adapters**:
 - `src/adapters/obsidian_loader.py` — `ObsidianLoader` (implements `NoteLoader` + `NoteWriter`)
@@ -86,11 +86,12 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 GROQ_API_KEY=               # only when USE_LOCAL=false
 GROQ_MODEL=llama-3.3-70b-versatile
 HF_EMBED_MODEL=nomic-ai/nomic-embed-text-v1
-READONLY_MODE=false         # true disables create_note/edit_note tools (recommended in prod)
+READONLY_MODE=false         # true disables create_note/edit_note tools and .md import (recommended in prod)
 CHROMA_PERSIST_DIR=data/chroma_db  # where ChromaDB stores its files
 CHUNKER_STRATEGY=fixed      # fixed|markdown|backlink
 CHUNK_SIZE=512
 CHUNK_OVERLAP=50
+MAX_IMPORT_SIZE_MB=1        # max size of a .md attachment imported via chat
 LOG_LEVEL=INFO
 ```
 
@@ -103,8 +104,8 @@ find src -name "*.py" ! -name "__init__.py"
 ```
 
 As of Fase 5/6 complete (agent + Chainlit UI), files with real content:
-- `src/domain/models.py` — `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`
-- `src/domain/ports.py` — `NoteLoader`, `NoteWriter`, `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + full exception hierarchy
+- `src/domain/models.py` — `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`, `ImportConflictPolicy`
+- `src/domain/ports.py` — `NoteLoader`, `NoteWriter` (`create`/`update`/`create_raw`), `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + full exception hierarchy
 - `src/adapters/obsidian_loader.py` — `ObsidianLoader`
 - `src/adapters/chunkers/fixed_size.py` — `FixedSizeChunker`, `split_text()`
 - `src/adapters/chunkers/markdown_header.py` — `MarkdownHeaderChunker`
@@ -116,7 +117,7 @@ As of Fase 5/6 complete (agent + Chainlit UI), files with real content:
 - `src/infrastructure/config.py` — factory: `get_llm`, `get_langchain_llm`, `get_embedder`, `get_vector_store`, `get_note_loader`, `get_note_writer`, `get_chunker`, `get_chunker_from_env`, `is_readonly`
 - `src/application/ingest_vault.py` — `IngestVault` (loader+chunker+store; `execute()`, `execute_single()`)
 - `src/application/search_notes.py` — `SearchNotes` (store; `execute()`, `execute_text()`)
-- `src/application/manage_notes.py` — `ManageNotes` (loader+writer+ingest; `create()`, `update()`, `get()`)
+- `src/application/manage_notes.py` — `ManageNotes` (loader+writer+ingest; `create()`, `update()`, `get()`, `import_markdown()` — deterministic UI import of an attached `.md`, bypasses the LLM)
 - `src/agent/agent.py`, `src/agent/tools.py` — ReAct agent + tools (see Architecture above)
 - `app.py`, `src/app/__init__.py` — Chainlit entrypoint
 - `scripts/test_ollama_chat.py`, `scripts/test_groq.py` — connectivity smoke tests
