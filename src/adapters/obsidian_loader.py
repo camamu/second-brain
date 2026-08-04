@@ -12,6 +12,7 @@ from typing import List
 import frontmatter
 
 from src.domain.models import Note, NoteType
+from src.domain.obsidian_conventions import sanitize_filename
 from src.domain.ports import NoteLoader, NoteNotFoundError, NoteWriter, VaultWriteError
 from src.domain.tags import normalize_tags
 
@@ -116,8 +117,7 @@ class ObsidianLoader(NoteLoader, NoteWriter):
         inbox = self._vault / "00-inbox"
         inbox.mkdir(parents=True, exist_ok=True)
 
-        slug = re.sub(r"[^\w\s-]", "", title.lower())
-        slug = re.sub(r"[\s_]+", "-", slug).strip("-")
+        slug = sanitize_filename(title)
         path = inbox / f"{slug}.md"
 
         if path.exists():
