@@ -208,6 +208,25 @@ class NoteWriter(ABC):
         """
         ...
 
+    @abstractmethod
+    def move(self, note_id: str, target_folder: str) -> Note:
+        """Mueve una nota a otra carpeta del vault, preservando su contenido.
+
+        Args:
+            note_id: Identificador de la nota a mover.
+            target_folder: Carpeta destino, relativa a la raiz del vault
+                (p. ej. "02-areas/rag"). Debe existir ya en el vault.
+
+        Returns:
+            La nota con su nuevo id y path, tras el movimiento.
+
+        Raises:
+            NoteNotFoundError: Si note_id no existe en el vault.
+            VaultWriteError: Si target_folder no existe, queda fuera del
+                vault, o ya hay un fichero con ese nombre en el destino.
+        """
+        ...
+
 
 class BaseChunker(ABC):
     """Contrato base comun para los tres chunkers.

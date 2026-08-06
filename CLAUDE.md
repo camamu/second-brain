@@ -34,14 +34,16 @@ Hexagonal. The dependency rule is strict: inner layers never import from outer o
 src/domain/          → entities (frozen dataclasses) + ABC ports — zero external deps
 src/application/     → use cases (one class per file, one execute() method)
 src/adapters/        → port implementations: chunkers, embedders, llm, loaders, vector_stores
-src/agent/           → LangChain ReAct agent + tools (search_vault, create_note, edit_note)
+src/agent/           → LangChain ReAct agent + tools (search_vault, create_note, edit_note, list_folders, move_note)
 src/app/             → Chainlit entrypoint (imported by app.py at repo root)/
 src/infrastructure/  → config loading (.env), dependency wiring
 ```
 
-**Domain entities** (`src/domain/models.py`): `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, plus enums `ChunkStrategy`, `NoteType` and `ImportConflictPolicy` (`FAIL`/`OVERWRITE`/`COPY`, used by `NoteWriter.create_raw` when importing a `.md` whose note_id already exists). All are `@dataclass(frozen=True)`.
+**Domain entities** (`src/domain/models.py`): `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `MoveResult` (result of moving a note: new `Note`, `old_id`, `chunks_indexed`, `relinked_notes`, `failed_relinks`), plus enums `ChunkStrategy`, `NoteType` and `ImportConflictPolicy` (`FAIL`/`OVERWRITE`/`COPY`, used by `NoteWriter.create_raw` when importing a `.md` whose note_id already exists). All are `@dataclass(frozen=True)`.
 
-**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter` (`create`/`update`/`create_raw` — `create_raw` preserves the original frontmatter of an imported `.md` instead of reconstructing it), `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + exceptions `ObsidianRagError`, `NoteNotFoundError`, `ChunkingError`, `EmbeddingError`, `VectorStoreError`, `VaultWriteError`, `ConfigError`.
+**Ports** (`src/domain/ports.py`): `NoteLoader`, `NoteWriter` (`create`/`update`/`create_raw`/`move` — `create_raw` preserves the original frontmatter of an imported `.md` instead of reconstructing it; `move` relocates a note to another vault folder, changing its `note_id`), `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + exceptions `ObsidianRagError`, `NoteNotFoundError`, `ChunkingError`, `EmbeddingError`, `VectorStoreError`, `VaultWriteError`, `ConfigError`.
+
+**`src/domain/obsidian_conventions.py`**: pure functions for Obsidian-compatible note writing — `sanitize_filename`, `validate_tag`, `build_frontmatter`, `build_wikilink`, `rewrite_wikilink_target` (rewrites `[[old]]`/`[[old|alias]]` to point at a new target, preserving the alias; used by `MoveNote` to fix inbound backlinks after a move).
 
 **Implemented adapters**:
 - `src/adapters/obsidian_loader.py` — `ObsidianLoader` (implements `NoteLoader` + `NoteWriter`)
@@ -57,8 +59,8 @@ src/infrastructure/  → config loading (.env), dependency wiring
 - `src/infrastructure/config.py` — composition root / factory (reads `.env`, lazy imports)
 
 **Agent** (`src/agent/`):
-- `src/agent/agent.py` — `create_agent()` builds a LangChain `AgentExecutor` (ReAct, `handle_parsing_errors` set to a Spanish-language guidance string, `max_iterations=10`, default `early_stopping_method="force"` so the executor never raises on max-iterations or on repeated parsing failures — it returns gracefully instead)
-- `src/agent/tools.py` — `create_search_tool`, `create_note_tool`, `create_edit_tool` wrapping `SearchNotes`/`ManageNotes`
+- `src/agent/agent.py` — `create_agent()` builds a LangChain `AgentExecutor` (ReAct, `handle_parsing_errors` set to a Spanish-language guidance string, `max_iterations=10`, default `early_stopping_method="force"` so the executor never raises on max-iterations or on repeated parsing failures — it returns gracefully instead). Takes an optional `move_use_case: MoveNote | None`; when provided and `readonly=False`, registers `list_folders`/`move_note` in addition to the base three tools.
+- `src/agent/tools.py` — `create_search_tool`, `create_note_tool`, `create_edit_tool` wrapping `SearchNotes`/`ManageNotes`; `create_list_folders_tool`, `create_move_tool` wrapping `MoveNote`. All write tools (`create_note`, `edit_note`, `move_note`) take a `ConfirmCallback` and must get user confirmation before writing — `move_note`'s confirmation summary also states how many notes will have their `[[wikilinks]]` rewritten.
 
 **App** (`src/app/` + `app.py`):
 - `app.py` (repo root) — `chainlit run` entrypoint, delegates via `from src.app import *`
@@ -86,7 +88,7 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 GROQ_API_KEY=               # only when USE_LOCAL=false
 GROQ_MODEL=llama-3.3-70b-versatile
 HF_EMBED_MODEL=nomic-ai/nomic-embed-text-v1
-READONLY_MODE=false         # true disables create_note/edit_note tools and .md import (recommended in prod)
+READONLY_MODE=false         # true disables create_note/edit_note/move_note/list_folders tools and .md import (recommended in prod)
 CHROMA_PERSIST_DIR=data/chroma_db  # where ChromaDB stores its files
 CHUNKER_STRATEGY=fixed      # fixed|markdown|backlink
 CHUNK_SIZE=512
@@ -103,10 +105,11 @@ Verify what exists before referencing it:
 find src -name "*.py" ! -name "__init__.py"
 ```
 
-As of Fase 5/6 complete (agent + Chainlit UI), files with real content:
-- `src/domain/models.py` — `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `ChunkStrategy`, `NoteType`, `ImportConflictPolicy`
-- `src/domain/ports.py` — `NoteLoader`, `NoteWriter` (`create`/`update`/`create_raw`), `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + full exception hierarchy
-- `src/adapters/obsidian_loader.py` — `ObsidianLoader`
+As of Fase 5/6 complete (agent + Chainlit UI) plus the move-note-suggestion feature, files with real content:
+- `src/domain/models.py` — `Note`, `Chunk`, `SearchResult`, `RetrievalQuery`, `EvaluationSample`, `EvaluationResult`, `MoveResult`, `ChunkStrategy`, `NoteType`, `ImportConflictPolicy`
+- `src/domain/ports.py` — `NoteLoader`, `NoteWriter` (`create`/`update`/`create_raw`/`move`), `BaseChunker`, `ChunkEmbedder`, `VectorStore`, `ConversationalLLM`, `IEvaluationRepo` + full exception hierarchy
+- `src/domain/obsidian_conventions.py` — `sanitize_filename`, `validate_tag`, `build_frontmatter`, `build_wikilink`, `rewrite_wikilink_target`
+- `src/adapters/obsidian_loader.py` — `ObsidianLoader` (implements `move()` with anti path-traversal validation)
 - `src/adapters/chunkers/fixed_size.py` — `FixedSizeChunker`, `split_text()`
 - `src/adapters/chunkers/markdown_header.py` — `MarkdownHeaderChunker`
 - `src/adapters/chunkers/backlink_aware.py` — `BacklinkAwareChunker`
@@ -118,12 +121,13 @@ As of Fase 5/6 complete (agent + Chainlit UI), files with real content:
 - `src/application/ingest_vault.py` — `IngestVault` (loader+chunker+store; `execute()`, `execute_single()`)
 - `src/application/search_notes.py` — `SearchNotes` (store; `execute()`, `execute_text()`)
 - `src/application/manage_notes.py` — `ManageNotes` (loader+writer+ingest; `create()`, `update()`, `get()`, `import_markdown()` — deterministic UI import of an attached `.md`, bypasses the LLM)
+- `src/application/move_note.py` — `MoveNote` (loader+writer+store+ingest; `list_folders()`, `find_inbound_links()`, `execute()` — moves a note, reindexes it under the new id in every chunking strategy, and best-effort rewrites `[[wikilinks]]` in notes that linked to it)
 - `src/agent/agent.py`, `src/agent/tools.py` — ReAct agent + tools (see Architecture above)
 - `app.py`, `src/app/__init__.py` — Chainlit entrypoint
 - `scripts/test_ollama_chat.py`, `scripts/test_groq.py` — connectivity smoke tests
 - `scripts/ingest.py` — CLI de ingesta (`python scripts/ingest.py [--strategy fixed|markdown|backlink]`)
 - `scripts/check_architecture.py` — enforces the hexagonal dependency rule, run in CI
-- `tests/unit/` — 98 tests passing (models, loader, chunkers, chroma_store, config, ingest_vault, search_notes, manage_notes, agent, tools, metrics)
+- `tests/unit/` — 211 tests passing (models, loader, chunkers, chroma_store, config, ingest_vault, search_notes, manage_notes, move_note, agent, tools, metrics, obsidian_conventions)
 - `tests/integration/test_ollama_integration.py` — 3 tests `@integration` (require Ollama)
 
 `data/chroma_db/` is populated by running `python scripts/ingest.py` (with Ollama running, or Groq/HF configured via `USE_LOCAL=false`).

@@ -3,11 +3,18 @@
 import json
 from unittest.mock import MagicMock
 
-from src.agent.tools import create_edit_tool, create_note_tool, create_search_tool
+from src.agent.tools import (
+    create_edit_tool,
+    create_list_folders_tool,
+    create_move_tool,
+    create_note_tool,
+    create_search_tool,
+)
 from src.application.manage_notes import ManageNotes
+from src.application.move_note import MoveNote
 from src.application.search_notes import SearchNotes
-from src.domain.models import ChunkStrategy, SearchResult
-from src.domain.ports import NoteNotFoundError, VectorStoreError
+from src.domain.models import ChunkStrategy, MoveResult, SearchResult
+from src.domain.ports import NoteNotFoundError, VaultWriteError, VectorStoreError
 
 
 def _make_search_result(rank: int = 1) -> SearchResult:
@@ -229,3 +236,123 @@ class TestEditNoteTool:
 
         manage_uc.update.assert_not_called()
         assert "canceló" in result
+
+
+class TestListFoldersTool:
+    def test_list_folders_tool_returns_existing_folders(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["00-inbox", "02-areas/rag"]
+        tool = create_list_folders_tool(move_uc)
+
+        result = tool.func("")
+
+        assert "00-inbox" in result
+        assert "02-areas/rag" in result
+
+    def test_list_folders_tool_reports_empty_vault(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = []
+        tool = create_list_folders_tool(move_uc)
+
+        result = tool.func("")
+
+        assert "no tiene ninguna subcarpeta" in result
+
+
+class TestMoveNoteTool:
+    def _result(self, note_id: str = "02-areas/rag/chunking") -> MoveResult:
+        note = MagicMock()
+        note.id = note_id
+        return MoveResult(note=note, old_id="00-inbox/chunking", chunks_indexed=3)
+
+    async def test_move_tool_moves_when_user_approves(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["02-areas/rag"]
+        move_uc.find_inbound_links.return_value = []
+        move_uc.execute.return_value = self._result()
+        tool = create_move_tool(move_uc, _approve)
+        payload = json.dumps(
+            {"note_id": "00-inbox/chunking", "target_folder": "02-areas/rag"}
+        )
+
+        result = await tool.coroutine(payload)
+
+        move_uc.execute.assert_called_once_with("00-inbox/chunking", "02-areas/rag")
+        assert "02-areas/rag/chunking" in result
+
+    async def test_move_tool_does_not_move_when_user_rejects(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["02-areas/rag"]
+        move_uc.find_inbound_links.return_value = []
+        tool = create_move_tool(move_uc, _reject)
+        payload = json.dumps(
+            {"note_id": "00-inbox/chunking", "target_folder": "02-areas/rag"}
+        )
+
+        result = await tool.coroutine(payload)
+
+        move_uc.execute.assert_not_called()
+        assert "canceló" in result
+
+    async def test_move_tool_rejects_unknown_target_folder(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["00-inbox"]
+        tool = create_move_tool(move_uc, _approve)
+        payload = json.dumps(
+            {"note_id": "00-inbox/chunking", "target_folder": "99-inventada"}
+        )
+
+        result = await tool.coroutine(payload)
+
+        move_uc.execute.assert_not_called()
+        assert "no es una carpeta existente" in result
+
+    async def test_move_tool_returns_error_when_note_not_found(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["02-areas/rag"]
+        move_uc.find_inbound_links.return_value = []
+        move_uc.execute.side_effect = NoteNotFoundError("no existe")
+        tool = create_move_tool(move_uc, _approve)
+        payload = json.dumps(
+            {"note_id": "00-inbox/fantasma", "target_folder": "02-areas/rag"}
+        )
+
+        result = await tool.coroutine(payload)
+
+        assert "no existe" in result
+        assert "search_vault" in result
+
+    async def test_move_tool_returns_error_on_vault_write_error(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["02-areas/rag"]
+        move_uc.find_inbound_links.return_value = []
+        move_uc.execute.side_effect = VaultWriteError("ya existe")
+        tool = create_move_tool(move_uc, _approve)
+        payload = json.dumps(
+            {"note_id": "00-inbox/chunking", "target_folder": "02-areas/rag"}
+        )
+
+        result = await tool.coroutine(payload)
+
+        assert "Error al mover la nota" in result
+
+    async def test_move_tool_summary_mentions_notes_to_relink(self):
+        move_uc = MagicMock(spec=MoveNote)
+        move_uc.list_folders.return_value = ["02-areas/rag"]
+        move_uc.find_inbound_links.return_value = ["01-proyectos/tfm"]
+        move_uc.execute.return_value = self._result()
+        seen_summaries: list[str] = []
+
+        async def _capture(summary: str) -> bool:
+            seen_summaries.append(summary)
+            return True
+
+        tool = create_move_tool(move_uc, _capture)
+        payload = json.dumps(
+            {"note_id": "00-inbox/chunking", "target_folder": "02-areas/rag"}
+        )
+
+        await tool.coroutine(payload)
+
+        assert len(seen_summaries) == 1
+        assert "01-proyectos/tfm" in seen_summaries[0]

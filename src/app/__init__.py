@@ -13,6 +13,7 @@ from langchain.agents import AgentExecutor
 from src.agent.agent import create_agent
 from src.application.ingest_vault import IngestVault
 from src.application.manage_notes import ManageNotes
+from src.application.move_note import MoveNote
 from src.application.prune_orphans import PruneOrphans
 from src.application.search_notes import SearchNotes
 from src.domain.models import ChunkStrategy, ImportConflictPolicy, SearchResult
@@ -307,6 +308,7 @@ async def _init_agent_session(
         )
         search_uc = SearchNotes(store=store)
         manage_uc = ManageNotes(loader=loader, writer=writer, ingest=ingest_uc)
+        move_uc = MoveNote(loader=loader, writer=writer, store=store, ingest=ingest_uc)
         llm = get_langchain_llm()
         readonly = is_readonly()
         last_search_results: list[SearchResult] = []
@@ -318,6 +320,7 @@ async def _init_agent_session(
             readonly=readonly,
             last_results=last_search_results,
             confirm_action=None if readonly else _confirm_write_action,
+            move_use_case=None if readonly else move_uc,
         )
         cl.user_session.set("agent", agent)
         cl.user_session.set("last_search_results", last_search_results)

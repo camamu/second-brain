@@ -1,8 +1,8 @@
 """Agente ReAct de Second Brain usando LangChain.
 
-El agente orquesta las tres herramientas (search_vault, create_note, edit_note)
-con un LLM y memoria de conversación para crear una experiencia conversacional
-sobre el vault de Obsidian.
+El agente orquesta las herramientas (search_vault, create_note, edit_note,
+list_folders, move_note) con un LLM y memoria de conversación para crear una
+experiencia conversacional sobre el vault de Obsidian.
 """
 
 import logging
@@ -15,10 +15,13 @@ from langchain_core.language_models import BaseLanguageModel
 from src.agent.tools import (
     ConfirmCallback,
     create_edit_tool,
+    create_list_folders_tool,
+    create_move_tool,
     create_note_tool,
     create_search_tool,
 )
 from src.application.manage_notes import ManageNotes
+from src.application.move_note import MoveNote
 from src.application.search_notes import SearchNotes
 from src.domain.models import ChunkStrategy, SearchResult
 
@@ -89,11 +92,22 @@ Reglas:
   [[note_id_exacto]] — el mismo note_id exacto (ruta sin extensión) que
   usas para note_id en edit_note, no el título en lenguaje natural.
   NUNCA uses corchete simple ni markdown estándar para esto.
-  Correcto: Relacionado con [[01-inbox/cocción-de-huevos]]
+  Correcto: Relacionado con [[00-inbox/cocción-de-huevos]]
   Incorrecto: Relacionado con [cocción de huevos]
   Un corchete simple no crea un enlace real: ObsidianLoader solo
   reconoce [[...]] para construir los backlinks de una nota, usados por
   la estrategia de chunking backlink.
+- MOVER NOTAS: cuando el usuario pida mover una nota a otra carpeta, o
+  cuando detectes que una nota de 00-inbox/ encajaría mejor en otra
+  carpeta ya existente, llama SIEMPRE primero a list_folders para
+  conocer las carpetas reales del vault — nunca inventes ni asumas un
+  nombre de carpeta. Después llama a move_note con el note_id exacto
+  (obtenido de search_vault) y una de las carpetas devueltas por
+  list_folders. move_note ya muestra su propio diálogo de confirmación
+  antes de mover nada, igual que create_note/edit_note: no pidas
+  permiso en texto, llama directo a la tool. Si la Observation indica
+  que el usuario canceló el movimiento, NO reintentes: pasa directo a
+  "Thought: Tengo la respuesta final." y reconoce la cancelación.
 - CONTINUIDAD DE PREGUNTAS PROPIAS: si tu Final Answer anterior formuló
   una pregunta de seguimiento al usuario (sobre contenido, tags,
   guardar, confirmar, etc.), interpreta el siguiente mensaje del
@@ -149,6 +163,7 @@ def create_agent(
     readonly: bool = False,
     last_results: list[SearchResult] | None = None,
     confirm_action: ConfirmCallback | None = None,
+    move_use_case: MoveNote | None = None,
 ) -> AgentExecutor:
     """Construye el agente ReAct con las herramientas del vault.
 
@@ -157,13 +172,18 @@ def create_agent(
         search_use_case: Caso de uso de búsqueda semántica.
         manage_use_case: Caso de uso de gestión de notas.
         strategy: Estrategia de chunking para search_vault.
-        readonly: Si True, solo incluye search_vault (sin create/edit).
+        readonly: Si True, solo incluye search_vault (sin create/edit/move).
         last_results: lista mutable reenviada a create_search_tool para
             capturar los SearchResult de la última búsqueda (ver tools.py).
         confirm_action: Callback que pide confirmación al usuario antes de
-            crear o editar una nota (ver `src.agent.tools.ConfirmCallback`).
-            Obligatorio cuando `readonly=False`, ya que create_note/edit_note
-            no deben poder escribir sin confirmación.
+            crear, editar o mover una nota (ver
+            `src.agent.tools.ConfirmCallback`). Obligatorio cuando
+            `readonly=False`, ya que esas tools no deben poder escribir sin
+            confirmación.
+        move_use_case: Caso de uso de movimiento de notas. Si es None (por
+            defecto), el agente no registra list_folders ni move_note,
+            aunque `readonly=False` — permite mantener el resto de tests y
+            llamadas existentes sin tocar esta funcionalidad.
 
     Returns:
         AgentExecutor listo para recibir preguntas del usuario.
@@ -186,6 +206,9 @@ def create_agent(
             create_note_tool(manage_use_case, confirm_action),
             create_edit_tool(manage_use_case, confirm_action),
         ]
+        if move_use_case is not None:
+            tools.append(create_list_folders_tool(move_use_case))
+            tools.append(create_move_tool(move_use_case, confirm_action))
 
     memory = ConversationBufferWindowMemory(
         k=10,

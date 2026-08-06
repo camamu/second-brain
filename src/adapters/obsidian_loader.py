@@ -189,6 +189,44 @@ class ObsidianLoader(NoteLoader, NoteWriter):
         path.write_text(self._normalize_raw_tags(raw_content), encoding="utf-8")
         return self._parse(path)
 
+    def move(self, note_id: str, target_folder: str) -> Note:
+        """Mueve una nota a otra carpeta del vault, preservando su contenido.
+
+        Args:
+            note_id: Identificador de la nota a mover.
+            target_folder: Carpeta destino, relativa a la raiz del vault
+                (p. ej. "02-areas/rag"). Debe existir ya en el vault.
+
+        Returns:
+            La nota con su nuevo id y path, tras el movimiento.
+
+        Raises:
+            NoteNotFoundError: Si note_id no existe en el vault.
+            VaultWriteError: Si target_folder no existe, queda fuera del
+                vault, o ya hay un fichero con ese nombre en el destino.
+        """
+        existing = self.load_by_id(note_id)
+        vault_root = self._vault.resolve()
+
+        clean_folder = target_folder.strip("/")
+        dest_dir = (self._vault / clean_folder).resolve()
+        if not dest_dir.is_relative_to(vault_root):
+            raise VaultWriteError(
+                f"La carpeta destino '{target_folder}' está fuera del vault"
+            )
+        if not dest_dir.is_dir():
+            raise VaultWriteError(f"La carpeta destino '{target_folder}' no existe")
+
+        src = Path(existing.path)
+        dest = dest_dir / src.name
+        if dest == src:
+            raise VaultWriteError(f"La nota '{note_id}' ya está en '{target_folder}'")
+        if dest.exists():
+            raise VaultWriteError(f"Ya existe una nota en '{dest}'")
+
+        src.rename(dest)
+        return self._parse(dest)
+
     # ------------------------------------------------------------------
     # Privado
     # ------------------------------------------------------------------
