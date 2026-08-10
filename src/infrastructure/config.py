@@ -64,6 +64,27 @@ def _get_bool(key: str, default: bool = True) -> bool:
     return raw == "true"
 
 
+def _get_int(key: str, default: int) -> int:
+    """Lee una variable de entorno como entero.
+
+    Args:
+        key: Nombre de la variable de entorno.
+        default: Valor por defecto si la variable no existe o no es un
+            entero válido.
+
+    Returns:
+        El entero parseado, o `default` si la variable falta o es inválida.
+    """
+    raw = os.getenv(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("%s inválido: '%s'; usando default=%d", key, raw, default)
+        return default
+
+
 # ─── factories ────────────────────────────────────────────────────────────────
 
 
@@ -245,6 +266,15 @@ def is_readonly() -> bool:
         True si READONLY_MODE=true, False en caso contrario.
     """
     return _get_bool("READONLY_MODE", default=False)
+
+
+def get_max_import_size_mb() -> int:
+    """Tamaño máximo, en MB, admitido al importar un .md adjunto en el chat.
+
+    Returns:
+        El valor de MAX_IMPORT_SIZE_MB, o 1 si no está definida o es inválida.
+    """
+    return _get_int("MAX_IMPORT_SIZE_MB", default=1)
 
 
 def get_evaluation_repo(

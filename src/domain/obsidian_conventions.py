@@ -139,3 +139,28 @@ def build_wikilink(
 
     prefix = "!" if embed else ""
     return f"{prefix}[[{link}]]"
+
+
+def rewrite_wikilink_target(content: str, old_target: str, new_target: str) -> str:
+    """Sustituye el destino de un wikilink preservando su alias.
+
+    Reescribe `[[old_target]]` y `[[old_target|alias]]` por
+    `[[new_target]]` / `[[new_target|alias]]`. Coincide exactamente con
+    `old_target` (no con targets que solo lo contienen como substring),
+    igual que `_BACKLINK_RE` en `src/adapters/obsidian_loader.py`.
+
+    Args:
+        content: Contenido markdown donde buscar los wikilinks.
+        old_target: Destino actual del wikilink (note_id), sin `.md`.
+        new_target: Destino al que debe apuntar tras la reescritura.
+
+    Returns:
+        El contenido con los wikilinks a `old_target` reescritos.
+    """
+    pattern = re.compile(r"\[\[" + re.escape(old_target) + r"(\|[^\]]+)?\]\]")
+
+    def _replace(match: re.Match[str]) -> str:
+        alias_part = match.group(1) or ""
+        return f"[[{new_target}{alias_part}]]"
+
+    return pattern.sub(_replace, content)

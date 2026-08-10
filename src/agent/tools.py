@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from langchain.tools import Tool
 
 from src.application.manage_notes import ManageNotes
+from src.application.move_note import MoveNote
 from src.application.search_notes import SearchNotes
 from src.domain.models import ChunkStrategy, SearchResult
 from src.domain.ports import NoteNotFoundError, VaultWriteError, VectorStoreError
@@ -260,5 +261,133 @@ def create_edit_tool(
             "nota, inclúyelos en el campo JSON 'tags' — se SUMAN a los tags "
             "que ya tiene la nota, no los reemplazan. "
             "NUNCA escribas '#tag' dentro de content."
+        ),
+    )
+
+
+def create_list_folders_tool(move_use_case: MoveNote) -> Tool:
+    """Crea la herramienta list_folders para el agente ReAct.
+
+    Args:
+        move_use_case: Caso de uso de movimiento de notas.
+
+    Returns:
+        Tool de LangChain (síncrona) que lista las carpetas existentes
+        del vault, para que el agente nunca invente un destino en
+        move_note.
+    """
+
+    def _list(_tool_input: str = "") -> str:
+        folders = move_use_case.list_folders()
+        if not folders:
+            return "El vault no tiene ninguna subcarpeta todavía."
+        return "\n".join(f"- {folder}" for folder in folders)
+
+    return Tool(
+        name="list_folders",
+        func=_list,
+        description=(
+            "Lista las carpetas que ya existen en el vault. Llama a esta "
+            "herramienta ANTES de move_note para saber qué destinos son "
+            "válidos: move_note rechaza cualquier carpeta que no aparezca "
+            "aquí. El input se ignora."
+        ),
+    )
+
+
+def create_move_tool(move_use_case: MoveNote, confirm_action: ConfirmCallback) -> Tool:
+    """Crea la herramienta move_note para el agente ReAct.
+
+    Args:
+        move_use_case: Caso de uso de movimiento de notas.
+        confirm_action: Callback que pide confirmación al usuario antes de
+            mover la nota. Obligatorio: mover notas sin pedir permiso es
+            precisamente el comportamiento que esta tool debe evitar.
+
+    Returns:
+        Tool de LangChain (solo async) que mueve una nota a otra carpeta
+        del vault, reindexándola y reenlazando sus backlinks entrantes.
+    """
+
+    async def _move(tool_input: str) -> str:
+        try:
+            data = _safe_json_loads(tool_input)
+            note_id = data["note_id"]
+            target_folder = data["target_folder"]
+            reason = data.get("reason", "")
+        except (json.JSONDecodeError, KeyError):
+            return (
+                "Formato incorrecto. Usa JSON con campos: "
+                "note_id, target_folder, reason (opcional)"
+            )
+
+        valid_folders = move_use_case.list_folders()
+        if target_folder.strip("/") not in valid_folders:
+            return (
+                f"'{target_folder}' no es una carpeta existente del vault. "
+                f"Usa list_folders para ver las carpetas válidas: "
+                f"{', '.join(valid_folders) if valid_folders else '(ninguna)'}"
+            )
+
+        inbound = move_use_case.find_inbound_links(note_id)
+        relink_note = (
+            f"Se reescribirán los enlaces [[...]] de {len(inbound)} nota(s): "
+            f"{', '.join(inbound)}"
+            if inbound
+            else "Ninguna otra nota enlaza a esta."
+        )
+        summary = (
+            f"Mover nota:\n\n"
+            f"**Nota:** {note_id}\n"
+            f"**Carpeta destino:** {target_folder}\n"
+            f"**Motivo:** {reason or '(sin especificar)'}\n\n"
+            f"{relink_note}"
+        )
+        if not await confirm_action(summary):
+            logger.info(
+                "move_note: movimiento cancelado por el usuario ('%s')", note_id
+            )
+            return "El usuario canceló el movimiento de la nota."
+
+        try:
+            result = move_use_case.execute(note_id, target_folder)
+            logger.info("move_note: nota movida '%s' -> '%s'", note_id, result.note.id)
+            summary_parts = [
+                f"Nota movida: {result.old_id} -> {result.note.id} "
+                f"({result.chunks_indexed} chunks indexados)."
+            ]
+            if result.relinked_notes:
+                summary_parts.append(
+                    f"Enlaces actualizados en: {', '.join(result.relinked_notes)}."
+                )
+            if result.failed_relinks:
+                summary_parts.append(
+                    f"No se pudieron actualizar los enlaces en: "
+                    f"{', '.join(result.failed_relinks)}."
+                )
+            return " ".join(summary_parts)
+        except NoteNotFoundError:
+            return (
+                f"La nota '{note_id}' no existe. "
+                "Usa search_vault para encontrarla primero."
+            )
+        except VaultWriteError as exc:
+            logger.error("move_note error: %s", exc, exc_info=True)
+            return f"Error al mover la nota: {exc}"
+
+    return Tool(
+        name="move_note",
+        func=None,
+        coroutine=_move,
+        description=(
+            "Mueve una nota existente a otra carpeta del vault. Llama "
+            "primero a list_folders para conocer los destinos válidos: "
+            "esta herramienta rechaza cualquier carpeta que no exista ya. "
+            "El input debe ser un JSON con campos: "
+            "note_id (str, ruta exacta obtenida de search_vault), "
+            "target_folder (str, una de las carpetas de list_folders), "
+            "reason (str, opcional, por qué encaja mejor en esa carpeta). "
+            "Muestra un diálogo de confirmación al usuario antes de mover "
+            "nada; si lo cancela, no reintentes en el mismo turno."
         ),
     )

@@ -8,6 +8,7 @@ from langchain_community.llms.fake import FakeListLLM
 
 from src.agent.agent import _REACT_PROMPT_TEMPLATE, create_agent
 from src.application.manage_notes import ManageNotes
+from src.application.move_note import MoveNote
 from src.application.search_notes import SearchNotes
 from src.domain.models import ChunkStrategy, SearchResult
 
@@ -156,6 +157,59 @@ class TestCreateAgent:
         )
 
         assert len(executor.tools) == 1
+
+    def test_create_agent_readonly_excludes_move_tools(self):
+        """READONLY_MODE=true no debe registrar list_folders ni move_note,
+        aunque se pase move_use_case: la guarda de solo lectura vive en
+        create_agent, no en la propia tool."""
+        executor = create_agent(
+            llm=_make_fake_llm(),
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+            move_use_case=MagicMock(spec=MoveNote),
+            readonly=True,
+        )
+
+        tool_names = [t.name for t in executor.tools]
+        assert "move_note" not in tool_names
+        assert "list_folders" not in tool_names
+
+    def test_create_agent_registers_move_tools_when_move_use_case_provided(self):
+        executor = create_agent(
+            llm=_make_fake_llm(),
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+            confirm_action=_auto_confirm,
+            move_use_case=MagicMock(spec=MoveNote),
+        )
+
+        tool_names = [t.name for t in executor.tools]
+        assert tool_names == [
+            "search_vault",
+            "create_note",
+            "edit_note",
+            "list_folders",
+            "move_note",
+        ]
+
+    def test_create_agent_omits_move_tools_when_move_use_case_is_none(self):
+        """Sin move_use_case (default None), el agente conserva exactamente
+        las tres tools existentes, sin romper llamadas ya en producción."""
+        executor = create_agent(
+            llm=_make_fake_llm(),
+            search_use_case=MagicMock(spec=SearchNotes),
+            manage_use_case=MagicMock(spec=ManageNotes),
+            confirm_action=_auto_confirm,
+        )
+
+        assert len(executor.tools) == 3
+
+    def test_react_prompt_contains_move_notes_rules(self):
+        """El prompt debe exigir list_folders antes de move_note y prohibir
+        inventar carpetas destino."""
+        assert "MOVER NOTAS" in _REACT_PROMPT_TEMPLATE
+        assert "list_folders" in _REACT_PROMPT_TEMPLATE
+        assert "nunca inventes ni asumas un" in _REACT_PROMPT_TEMPLATE
 
 
 class TestAgentExecutorBehavior:

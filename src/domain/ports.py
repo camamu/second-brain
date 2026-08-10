@@ -20,6 +20,7 @@ from .models import (
     Chunk,
     EvaluationResult,
     EvaluationSample,
+    ImportConflictPolicy,
     Note,
     RetrievalQuery,
     SearchResult,
@@ -175,6 +176,54 @@ class NoteWriter(ABC):
 
         Raises:
             NoteNotFoundError: Si note_id no existe en el vault.
+        """
+        ...
+
+    @abstractmethod
+    def create_raw(
+        self,
+        filename: str,
+        raw_content: str,
+        policy: ImportConflictPolicy = ImportConflictPolicy.FAIL,
+    ) -> Note:
+        """Escribe un documento .md preservando su frontmatter original.
+
+        A diferencia de `create`, no reconstruye el frontmatter: el
+        contenido crudo (incluido su YAML) se escribe tal cual, salvo que
+        la normalizacion de tags obligue a reserializarlo. Pensado para
+        importar notas ya existentes, no para que el LLM redacte una nueva.
+
+        Args:
+            filename: Nombre de fichero original (con o sin extension
+                .md); el note_id se deriva de su slug.
+            raw_content: Contenido completo del documento, incluido su
+                frontmatter YAML si lo tiene.
+            policy: Que hacer si el note_id resultante ya existe.
+
+        Returns:
+            La nota recien escrita.
+
+        Raises:
+            VaultWriteError: Si el note_id ya existe y policy es FAIL.
+        """
+        ...
+
+    @abstractmethod
+    def move(self, note_id: str, target_folder: str) -> Note:
+        """Mueve una nota a otra carpeta del vault, preservando su contenido.
+
+        Args:
+            note_id: Identificador de la nota a mover.
+            target_folder: Carpeta destino, relativa a la raiz del vault
+                (p. ej. "02-areas/rag"). Debe existir ya en el vault.
+
+        Returns:
+            La nota con su nuevo id y path, tras el movimiento.
+
+        Raises:
+            NoteNotFoundError: Si note_id no existe en el vault.
+            VaultWriteError: Si target_folder no existe, queda fuera del
+                vault, o ya hay un fichero con ese nombre en el destino.
         """
         ...
 

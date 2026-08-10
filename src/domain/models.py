@@ -79,6 +79,21 @@ class NoteType(Enum):
         return self._label
 
 
+class ImportConflictPolicy(Enum):
+    """Politica de resolucion cuando un import de .md colisiona con un note_id existente.
+
+    Attributes:
+        FAIL: aborta la escritura y propaga VaultWriteError (comportamiento
+            por defecto, nunca sobrescribe en silencio).
+        OVERWRITE: reemplaza el fichero existente.
+        COPY: escribe con un sufijo numerico libre (-1, -2, ...).
+    """
+
+    FAIL = "fail"
+    OVERWRITE = "overwrite"
+    COPY = "copy"
+
+
 # =================== ENTIDADES ===================
 
 
@@ -160,6 +175,34 @@ class Note:
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
+
+
+@dataclass(frozen=True)
+class MoveResult:
+    """Resultado de mover una nota a otra carpeta del vault.
+
+    Attributes:
+        note: La nota ya reubicada, con su nuevo id.
+        old_id: Identificador que tenia la nota antes de moverse.
+        chunks_indexed: Chunks de la nota movida, sumados en todas
+            las estrategias de chunking activas.
+        relinked_notes: note_id de las notas cuyos wikilinks [[old_id]]
+            se reescribieron con exito a [[new_id]].
+        failed_relinks: note_id de las notas que enlazaban a old_id
+            pero no se pudieron reescribir.
+    """
+
+    note: Note
+    old_id: str
+    chunks_indexed: int
+    relinked_notes: List[str] = field(default_factory=list)
+    failed_relinks: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.old_id:
+            raise ValueError("old_id no puede estar vacio")
+        if self.chunks_indexed < 0:
+            raise ValueError("chunks_indexed no puede ser negativo")
 
 
 @dataclass(frozen=True)

@@ -948,3 +948,195 @@ misma configuración (un chunker). Preguntar explícitamente "¿este
 componente se usa igual en los dos flujos, o uno de ellos tiene una
 necesidad distinta que el diseño actual no contempla?" antes de dar por
 buena una única estrategia activa como suficiente para todo.
+
+## [2026-08-04] Verificación manual de subida de ficheros no automatizable con las herramientas de navegador disponibles
+
+**Fase**: feature-import-md-files.md
+**Categoría**: proceso / herramientas
+
+### Qué se hizo mal
+
+No fue un error de código: al llegar al paso de verificación manual
+("subir un `.md` desde `chainlit run app.py` y confirmar que se importa"),
+se intentó automatizar la interacción real del selector de fichero nativo
+del sistema operativo usando el Browser embebido de la sesión.
+
+### Por qué era un error
+
+`<input type="file">` no permite asignar `.value` por JavaScript por
+motivos de seguridad del navegador (`InvalidStateError`), así que
+`form_input` sobre el botón de adjuntar falla siempre. La alternativa —
+Claude en Chrome, que sí expone `file_upload` vía CDP — no estaba
+conectada en este entorno (`tabs_context_mcp` devolvió "extensión no
+conectada"). Ningún selector de fichero nativo es accesible por el árbol
+de accesibilidad del DOM, así que no hay forma de completarlo con las
+herramientas de automatización de navegador de esta sesión.
+
+### Cómo se corrigió
+
+Se sustituyó la interacción de UI por una llamada directa, vía script
+Python, a las mismas factories de composición (`get_note_loader`,
+`get_note_writer`, `get_vector_store`, `get_chunker`) y al mismo caso de
+uso (`ManageNotes.import_markdown`) que invoca `_handle_md_import` en
+`src/app/__init__.py`. Esto ejercita el camino de producción real
+(adaptador + aplicación + infraestructura) contra el vault y ChromaDB
+reales configurados en `.env`, sin pasar por el socket de Chainlit. Se
+verificó: creación de la nota con `aliases`/`type`/campo custom
+preservados, indexación en las 3 estrategias, búsqueda funcional, y
+detección + resolución de conflicto de `note_id` (política `COPY`). El
+vault real se limpió después (fichero(s) de prueba y chunks indexados
+borrados) para no dejar datos de test en el segundo cerebro del usuario.
+
+### Cómo evitarlo en el futuro
+
+Cuando la verificación manual de una fase implica adjuntar ficheros desde
+un `<input type="file">` real, no asumir que las herramientas de Browser
+del entorno pueden completarlo — comprobar primero si Claude en Chrome
+está conectado (`tabs_context_mcp`) antes de intentar `form_input` sobre
+un input de fichero, que fallará siempre. Si ninguna de las dos vías está
+disponible, el sustituto válido es invocar el mismo caso de uso de
+aplicación con las mismas factories de `src/infrastructure/config.py` que
+usa la app real, dejando explícito en el checklist que la verificación
+cubrió el camino de producción pero no la interacción literal del picker
+de fichero del navegador.
+
+---
+
+## [2026-08-04] Premisas de `tasks/feature-move-note-suggestion.md` no verificadas contra el código real
+
+**Fase**: feature-move-note-suggestion.md
+**Categoría**: spec / diagnóstico
+
+### Qué se hizo mal
+
+No fue un error de código propio de esta sesión, sino un error heredado de
+la especificación de la tarea: `tasks/feature-move-note-suggestion.md`
+afirmaba dos hechos sobre el sistema sin haberlos verificado contra el
+código o el vault real, y el plan inicial de la feature (mover una nota +
+reenlazar) se apoyaba en ambos.
+
+### Por qué era un error
+
+1. **Resolución de wikilinks**: la spec asumía que, como Obsidian resuelve
+   `[[...]]` por nombre de fichero, mover una nota de carpeta no rompería
+   los backlinks. Falso en esta implementación: `ObsidianLoader.exists()`
+   hace `(self._vault / f"{note_id}.md").exists()`
+   (`src/adapters/obsidian_loader.py:85`) y `load_by_id` lo mismo — el
+   texto entre corchetes se trata como **path relativo a la raíz del
+   vault**, no como stem. Verificado empíricamente: de 21 targets de
+   wikilink únicos en el vault real (`VAULT_PATH`), 16 ya estaban rotos
+   por escribirse con stem en vez de path completo.
+2. **Estructura del vault demo**: la spec describía «4 MOCs + notas
+   atómicas» como base para que el agente sugiriera carpetas destino. El
+   vault real tiene estructura PARA (`00-inbox`, `01-proyectos`,
+   `02-areas/{arquitectura,python,rag}`, `03-recursos`) sin ninguna nota
+   MOC; los tres valores de `type` del frontmatter no están en
+   `_NOTE_TYPE_MAP`, así que todas las notas caen en `NoteType.OTHER`.
+
+Ambas premisas habrían llevado a implementar un `move_note` que deja
+enlaces rotos en silencio y a hardcodear en el prompt una estructura de
+carpetas que no existe.
+
+### Cómo se corrigió
+
+La fase de diagnóstico obligatoria de la skill `critical-task-planning`
+exigía citar `file:line` de cada punto de la spec antes de programar. Ese
+paso detectó las dos discrepancias contra el código (`obsidian_loader.py`,
+`backlink_aware.py`) y contra el vault real (`VAULT_PATH`) antes de
+escribir ninguna línea de implementación. Se presentaron ambas al usuario
+vía `AskUserQuestion` con las alternativas y su coste, y se resolvió: (1)
+`MoveNote.execute()` reescribe los `[[old_id]]` entrantes en modo
+best-effort tras mover, en vez de asumir que no hace falta; (2) una tool
+`list_folders` descubre las carpetas reales del vault en runtime, en vez
+de que el prompt hardcodee una taxonomía inexistente. Ver
+`implementation-plan.md` de esta feature para el detalle completo.
+
+### Cómo evitarlo en el futuro
+
+Cuando un fichero de tarea (`tasks/*.md`) hace una afirmación sobre el
+comportamiento de un adaptador o sobre el estado de datos externos (un
+vault, una base de datos), tratarla como una hipótesis a verificar, no
+como un hecho — aunque el fichero use un tono seguro. La verificación
+correcta no es leer el nombre del método (`exists`, `load_by_id`) y asumir
+semántica "tipo Obsidian": hay que leer la implementación línea a línea
+(`obsidian_loader.py:71,85`) y, si es viable, medir contra los datos
+reales (aquí: contar cuántos wikilinks del vault real resuelven hoy) antes
+de diseñar sobre la premisa.
+
+## [2026-08-04] `edit_note` borró el contenido de una nota al pedirle al agente que la vinculara con otras
+
+**Fase**: post fase-6-chainlit.md (detectado durante feature-move-note-suggestion, no corregido en esa rama)
+**Categoría**: agente / pérdida de datos
+
+### Qué se hizo mal
+
+El usuario pidió vincular `00-inbox/patron-circuit-breaker` con las notas
+de Saga/Outbox. El agente confirmó la acción (el usuario aceptó el
+diálogo) y respondió que la nota se había actualizado con los enlaces
+correspondientes. El usuario reportó a continuación: "has eliminado el
+contenido de la nota" — el contenido existente quedó sustituido por poco
+más que el wikilink nuevo, en vez de conservarse con el enlace añadido.
+
+### Por qué era un error
+
+El prompt fuerza un flujo de un solo paso para editar: `search_vault` una
+vez → tomar el `note_id` → `edit_note` inmediatamente
+(`agent.py:40-42`). Pero `search_vault` devuelve **chunks** de ChromaDB,
+no la nota completa (`SearchNotes.execute_text` → `store.search()`,
+`search_notes.py:31`) — con `CHUNK_SIZE=512` o el chunker por headers,
+ese chunk es a menudo un fragmento parcial de la nota. La regla "ENLAZAR
+NOTAS" (`agent.py:86-96`, antes de esta rama) le decía al modelo que
+escribiera el wikilink en `content`, pero no exigía partir del contenido
+íntegro existente antes de añadirlo — mientras que el contrato de la tool
+sí pide "nuevo contenido completo de la nota" (`tools.py:256`). La única
+fuente de contenido disponible para el modelo (el chunk de `search_vault`)
+no lo era. `ManageNotes.update()` → `ObsidianLoader.update()` hace
+`post.content = content`: reemplazo total por diseño
+(`obsidian_loader.py:149`), así que el modelo sobrescribió la nota entera
+con el fragmento que tenía a mano más el enlace.
+
+El diálogo de confirmación (`_confirm_write_action`, mismo mecanismo que
+`create_note`/`edit_note` usan hoy) mostró el contenido *nuevo* truncado a
+800 caracteres, sin diff contra el original, así que nada alertó al
+usuario de que confirmar borraría el resto de la nota — confirmó sin
+saber que estaba autorizando una pérdida de datos.
+
+El intento de recuperación posterior sí tuvo red de seguridad: al
+reportar el problema, `search_vault` volvió a fallar con una excepción de
+parseo ReAct (categoría ya conocida, entradas #4 y #7 de este log), el
+`AgentExecutor` se recuperó vía `handle_parsing_errors` y reintentó con
+`edit_note` — pero el usuario canceló esa segunda confirmación, así que
+no hubo una segunda pérdida.
+
+### Cómo se corrigió
+
+**Aún no corregido.** El diagnóstico se completó durante el trabajo de
+`feature/move-note-suggestion`, pero por decisión explícita del usuario el
+fix se traslada a una rama/tarea separada (ver `spawn_task`), para no
+mezclar un bugfix de severidad alta con una feature en curso. La causa
+raíz identificada: no existe ninguna tool que exponga al agente el
+contenido completo y fiable de una nota antes de editarla —
+`ManageNotes.get(note_id)` (`manage_notes.py:99`) ya existe pero no está
+expuesta como tool. El fix propuesto (pendiente de implementar) es:
+- Tool `get_note` de solo lectura que devuelva el contenido íntegro.
+- Reforzar `edit_note`/el prompt para exigir que `content` incluya el
+  original íntegro cuando la intención es añadir, no reemplazar.
+- Mostrar en la confirmación un aviso o diff cuando el nuevo contenido es
+  drásticamente más corto que el original.
+
+Nota: `MoveNote.execute()` (esta misma rama) reescribe wikilinks entrantes
+usando `loader.load_by_id(linker_id).content` — el contenido **completo**
+del `NoteLoader`, no un chunk de `search_vault` — por lo que no está
+expuesto a esta misma clase de bug.
+
+### Cómo evitarlo en el futuro
+
+Cuando una tool exige "contenido completo" pero la única fuente de
+contenido que el agente tiene a mano es un resultado de búsqueda
+(potencialmente fragmentado por chunking), tratar eso como un contrato
+roto, no como un detalle de prompt a ajustar con una frase más. La
+garantía de "no perder contenido al editar" debe vivir en el código
+(una tool de lectura completa, o que `update()` rechace un reemplazo que
+no incluya el contenido previo), no solo en una instrucción del prompt —
+misma lección que la entrada #11 de este log, aplicada aquí a lectura en
+vez de a escritura.

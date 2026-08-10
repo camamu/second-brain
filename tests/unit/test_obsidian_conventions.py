@@ -5,6 +5,7 @@ import pytest
 from src.domain.obsidian_conventions import (
     build_frontmatter,
     build_wikilink,
+    rewrite_wikilink_target,
     sanitize_filename,
     validate_tag,
 )
@@ -195,3 +196,59 @@ def test_build_wikilink_invalid_block_id_raises_value_error() -> None:
     # Act / Assert
     with pytest.raises(ValueError):
         build_wikilink(target, block_id="bloque con espacios")
+
+
+def test_rewrite_wikilink_target_replaces_simple_link() -> None:
+    # Arrange
+    content = "Ver [[00-inbox/chunking]] para detalles."
+
+    # Act
+    result = rewrite_wikilink_target(content, "00-inbox/chunking", "02-areas/chunking")
+
+    # Assert
+    assert result == "Ver [[02-areas/chunking]] para detalles."
+
+
+def test_rewrite_wikilink_target_preserves_alias() -> None:
+    # Arrange
+    content = "Ver [[00-inbox/chunking|chunking]] para detalles."
+
+    # Act
+    result = rewrite_wikilink_target(content, "00-inbox/chunking", "02-areas/chunking")
+
+    # Assert
+    assert result == "Ver [[02-areas/chunking|chunking]] para detalles."
+
+
+def test_rewrite_wikilink_target_replaces_all_occurrences() -> None:
+    # Arrange
+    content = "[[00-inbox/chunking]] y de nuevo [[00-inbox/chunking|aquí]]."
+
+    # Act
+    result = rewrite_wikilink_target(content, "00-inbox/chunking", "02-areas/chunking")
+
+    # Assert
+    assert result == "[[02-areas/chunking]] y de nuevo [[02-areas/chunking|aquí]]."
+
+
+def test_rewrite_wikilink_target_ignores_partial_matches() -> None:
+    # Arrange — "00-inbox/chunking-avanzado" contiene "00-inbox/chunking" como
+    # substring pero es un note_id distinto y no debe reescribirse.
+    content = "Ver [[00-inbox/chunking-avanzado]]."
+
+    # Act
+    result = rewrite_wikilink_target(content, "00-inbox/chunking", "02-areas/chunking")
+
+    # Assert
+    assert result == "Ver [[00-inbox/chunking-avanzado]]."
+
+
+def test_rewrite_wikilink_target_no_match_returns_content_unchanged() -> None:
+    # Arrange
+    content = "Sin enlaces a esa nota aquí."
+
+    # Act
+    result = rewrite_wikilink_target(content, "00-inbox/chunking", "02-areas/chunking")
+
+    # Assert
+    assert result == content
